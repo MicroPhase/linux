@@ -275,6 +275,7 @@ struct ad9528_state {
 	struct clk_onecell_data		clk_data;
 	struct clk			*clks[AD9528_NUM_CHAN];
 	struct gpio_desc			*reset_gpio;
+	struct gpio_desc		*sysref_req_gpio;
 	struct jesd204_dev 		*jdev;
 	u32				jdev_lmfc_lemc_rate;
 	u32				jdev_lmfc_lemc_gcd;
@@ -1235,6 +1236,53 @@ pll2_bypassed:
 	return 0;
 }
 
+static int ad9528_lmfc_lemc_validate(struct ad9528_state *st, u64 dividend, u32 divisor)
+{
+	u32 rem, rem_l, rem_u, gcd_val, min;
+
+	if (divisor > dividend) {
+		unsigned long best_num, best_den;
+
+		rational_best_approximation(dividend, divisor,
+			65535, 65535, &best_num, &best_den);
+
+		divisor /= best_den;
+	}
+
+	gcd_val = gcd(dividend, divisor);
+	min = DIV_ROUND_CLOSEST(st->sysref_src_pll2, 65535UL);
+
+	if (gcd_val >= min) {
+		dev_dbg(&st->spi->dev,
+			"%s: dividend=%llu divisor=%u GCD=%u (st->sysref_src_pll2=%lu, min=%u)",
+			__func__, dividend, divisor, gcd_val, st->sysref_src_pll2, min);
+
+		st->jdev_lmfc_lemc_gcd = gcd_val;
+		return 0;
+	}
+
+	div_u64_rem(st->sysref_src_pll2, divisor, &rem);
+
+	dev_dbg(&st->spi->dev,
+		"%s: dividend=%llu divisor=%u GCD=%u rem=%u (st->sysref_src_pll2=%lu)",
+		__func__, dividend, divisor, gcd_val, rem, st->sysref_src_pll2);
+
+	div_u64_rem(dividend, divisor, &rem);
+	div_u64_rem(dividend, divisor - 1, &rem_l);
+	div_u64_rem(dividend, divisor + 1, &rem_u);
+
+	if (rem_l > rem && rem_u > rem) {
+		if (st->jdev_lmfc_lemc_gcd)
+			st->jdev_lmfc_lemc_gcd = min(st->jdev_lmfc_lemc_gcd, divisor);
+		else
+			st->jdev_lmfc_lemc_gcd = divisor;
+
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
 static int ad9528_jesd204_link_supported(struct jesd204_dev *jdev,
 		enum jesd204_state_op_reason reason,
 		struct jesd204_link *lnk)
@@ -1260,15 +1308,18 @@ static int ad9528_jesd204_link_supported(struct jesd204_dev *jdev,
 
 	if (st->jdev_lmfc_lemc_rate) {
 		st->jdev_lmfc_lemc_rate = min(st->jdev_lmfc_lemc_rate, (u32)rate);
-		st->jdev_lmfc_lemc_gcd = gcd(st->jdev_lmfc_lemc_gcd, rate);
+		ret = ad9528_lmfc_lemc_validate(st, st->jdev_lmfc_lemc_gcd, rate);
 	} else {
 		st->jdev_lmfc_lemc_rate = rate;
-		st->jdev_lmfc_lemc_gcd = gcd(st->sysref_src_pll2, rate);
+		ret = ad9528_lmfc_lemc_validate(st, st->sysref_src_pll2, rate);
 	}
 
 	dev_dbg(dev, "%s:%d link_num %u LMFC/LEMC %u/%lu gcd %u\n",
 		__func__, __LINE__, lnk->link_id, st->jdev_lmfc_lemc_rate,
 		rate, st->jdev_lmfc_lemc_gcd);
+
+	if (ret && lnk->subclass != JESD204_SUBCLASS_0)
+		return ret;
 
 	return JESD204_STATE_CHANGE_DONE;
 }
@@ -1284,21 +1335,27 @@ static int ad9528_jesd204_sysref(struct jesd204_dev *jdev)
 
 	mutex_lock(&st->lock);
 
-	val = ad9528_read(indio_dev, AD9528_SYSREF_CTRL);
-	if (val < 0) {
-		mutex_unlock(&st->lock);
-		return val;
+	if (st->sysref_req_gpio && st->pdata->sysref_req_en) {
+		gpiod_direction_output(st->sysref_req_gpio, 1);
+		mdelay(1);
+		ret = gpiod_direction_output(st->sysref_req_gpio, 0);
+	} else {
+		val = ad9528_read(indio_dev, AD9528_SYSREF_CTRL);
+		if (val < 0) {
+			mutex_unlock(&st->lock);
+			return val;
+		}
+
+		val &= ~AD9528_SYSREF_PATTERN_REQ;
+
+		ad9528_write(indio_dev, AD9528_SYSREF_CTRL, val);
+
+		val |= AD9528_SYSREF_PATTERN_REQ;
+
+		ret = ad9528_write(indio_dev, AD9528_SYSREF_CTRL, val);
+
+		ad9528_io_update(indio_dev);
 	}
-
-	val &= ~AD9528_SYSREF_PATTERN_REQ;
-
-	ad9528_write(indio_dev, AD9528_SYSREF_CTRL, val);
-
-	val |= AD9528_SYSREF_PATTERN_REQ;
-
-	ret = ad9528_write(indio_dev, AD9528_SYSREF_CTRL, val);
-
-	ad9528_io_update(indio_dev);
 
 	mutex_unlock(&st->lock);
 
@@ -1343,6 +1400,30 @@ static int ad9528_jesd204_link_pre_setup(struct jesd204_dev *jdev,
 
 	ad9528_io_update(indio_dev);
 
+	if (st->sysref_req_gpio && st->pdata->sysref_req_en &&
+		st->pdata->sysref_pattern_mode == SYSREF_PATTERN_CONTINUOUS)
+		gpiod_direction_output(st->sysref_req_gpio, 1);
+
+	return JESD204_STATE_CHANGE_DONE;
+}
+
+static int ad9528_jesd204_clks_sync(struct jesd204_dev *jdev,
+				      enum jesd204_state_op_reason reason)
+{
+	struct device *dev = jesd204_dev_to_device(jdev);
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	int ret;
+
+	if (reason != JESD204_STATE_OP_REASON_INIT)
+		return JESD204_STATE_CHANGE_DONE;
+
+	dev_dbg(dev, "%s:%d reason %s\n", __func__, __LINE__,
+		jesd204_state_op_reason_str(reason));
+
+	ret = ad9528_sync(indio_dev);
+	if (ret)
+		return ret;
+
 	return JESD204_STATE_CHANGE_DONE;
 }
 
@@ -1354,6 +1435,10 @@ static const struct jesd204_dev_data jesd204_ad9528_init = {
 		},
 		[JESD204_OP_LINK_PRE_SETUP] = {
 			.per_link = ad9528_jesd204_link_pre_setup,
+		},
+		[JESD204_OP_CLK_SYNC_STAGE1] = {
+			.per_device = ad9528_jesd204_clks_sync,
+			.mode = JESD204_STATE_OP_MODE_PER_DEVICE,
 		},
 	},
 };
@@ -1607,6 +1692,12 @@ static int ad9528_probe(struct spi_device *spi)
 		if (ret)
 			return ret;
 	}
+
+	st->sysref_req_gpio = devm_gpiod_get_optional(&spi->dev, "sysref-req",
+					GPIOD_OUT_LOW);
+	if (IS_ERR(st->sysref_req_gpio))
+		return dev_err_probe(&spi->dev, PTR_ERR(st->sysref_req_gpio),
+				     "cannot get sysref request gpio\n");
 
 	status0_gpio = devm_gpiod_get_optional(&spi->dev,
 					"status0", GPIOD_OUT_LOW);

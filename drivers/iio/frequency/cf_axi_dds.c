@@ -44,7 +44,7 @@
 
 static const unsigned int interpolation_factors_available[] = {1, 8};
 
-static const char * const dds_extend_names[] = {
+static const char * const dds_extend_names_complex[] = {
 	"TX1_I_F1", "TX1_I_F2", "TX1_Q_F1", "TX1_Q_F2",
 	"TX2_I_F1", "TX2_I_F2", "TX2_Q_F1", "TX2_Q_F2",
 	"TX3_I_F1", "TX3_I_F2", "TX3_Q_F1", "TX3_Q_F2",
@@ -79,10 +79,30 @@ static const char * const dds_extend_names[] = {
 	"TX32_I_F1", "TX32_I_F2", "TX32_Q_F1", "TX32_Q_F2",
 };
 
+static const char * const dds_extend_names[] = {
+	"1A", "1B", "2A", "2B",
+	"3A", "3B", "4A", "4B",
+	"5A", "5B", "6A", "6B",
+	"7A", "7B", "8A", "8B",
+	"9A", "9B", "10A", "10B",
+	"11A", "11B", "12A", "12B",
+	"13A", "13B", "14A", "14B",
+	"15A", "15B", "16A", "16B",
+	"17A", "17B", "18A", "18B",
+	"19A", "19B", "20A", "20B",
+	"21A", "21B", "22A", "22B",
+	"23A", "23B", "24A", "24B",
+	"25A", "25B", "26A", "26B",
+	"27A", "27B", "28A", "28B",
+	"29A", "29B", "30A", "30B",
+	"31A", "31B", "32A", "32B",
+};
+
 struct cf_axi_dds_state {
 	struct device			*dev_spi;
 	struct axi_data_offload_state	*data_offload;
 	struct clk			*clk;
+	struct clock_scale		clkscale;
 	struct cf_axi_dds_chip_info	*chip_info;
 	struct gpio_desc		*plddrbypass_gpio;
 	struct gpio_desc		*interpolation_gpio;
@@ -95,6 +115,7 @@ struct cf_axi_dds_state {
 	enum fifo_ctrl			dma_fifo_ctrl_bypass;
 	bool				dma_fifo_ctrl_oneshot;
 	bool				issue_sync_en;
+	bool				ext_sync_avail;
 
 	struct iio_info			iio_info;
 	struct iio_dev			*indio_dev;
@@ -264,12 +285,12 @@ int cf_axi_dds_pl_ddr_fifo_ctrl(struct cf_axi_dds_state *st, bool enable)
 }
 
 static int cf_axi_get_parent_sampling_frequency(struct cf_axi_dds_state *st,
-						unsigned long *freq)
+						u64 *freq)
 {
 	struct cf_axi_converter *conv;
 
 	if (st->standalone) {
-		*freq = st->dac_clk = clk_get_rate(st->clk);
+		*freq = st->dac_clk = clk_get_rate_scaled(st->clk, &st->clkscale);
 	} else {
 		conv = to_converter(st->dev_spi);
 		if (!conv->get_data_clk)
@@ -481,7 +502,8 @@ static int cf_axi_interpolation_set(struct cf_axi_dds_state *st,
 static ssize_t cf_axi_interpolation_store(struct cf_axi_dds_state *st,
 					  unsigned long frequency)
 {
-	unsigned long parent, val;
+	unsigned long val;
+	u64 parent;
 	int i, ret;
 
 	if (!frequency)
@@ -491,7 +513,7 @@ static ssize_t cf_axi_interpolation_store(struct cf_axi_dds_state *st,
 	if (ret < 0)
 		return ret;
 
-	val = DIV_ROUND_CLOSEST(parent, frequency);
+	val = DIV_ROUND_CLOSEST_ULL(parent, frequency);
 
 	for (i = 0; i < ARRAY_SIZE(interpolation_factors_available); i++) {
 		if (val == interpolation_factors_available[i]) {
@@ -509,7 +531,7 @@ static ssize_t cf_axi_sampling_frequency_available(struct device *dev,
 {
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct cf_axi_dds_state *st = iio_priv(indio_dev);
-	unsigned long freq;
+	u64 freq;
 	int i, ret;
 
 	if (!st->interpolation_factor)
@@ -523,8 +545,8 @@ static ssize_t cf_axi_sampling_frequency_available(struct device *dev,
 	}
 
 	for (i = 0, ret = 0; i < ARRAY_SIZE(interpolation_factors_available); i++)
-		ret += snprintf(buf + ret, PAGE_SIZE - ret, "%ld ",
-				freq / interpolation_factors_available[i]);
+		ret += snprintf(buf + ret, PAGE_SIZE - ret, "%lld ",
+				div_u64(freq, interpolation_factors_available[i]));
 
 	ret += snprintf(&buf[ret], PAGE_SIZE - ret, "\n");
 
@@ -533,37 +555,91 @@ static ssize_t cf_axi_sampling_frequency_available(struct device *dev,
 	return ret;
 }
 
-static ssize_t cf_axi_sync_start(struct device *dev,
+
+static const char * const axidds_sync_ctrls[] = {
+	"arm", "disarm", "trigger_manual",
+};
+
+static ssize_t axidds_sync_start_store(struct device *dev,
 				 struct device_attribute *attr,
 				 const char *buf, size_t len)
 {
 	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
 	struct cf_axi_dds_state *st = iio_priv(indio_dev);
-	bool state;
 	int ret;
 
-	ret = strtobool(buf, &state);
+	ret = sysfs_match_string(axidds_sync_ctrls, buf);
 	if (ret < 0)
 		return ret;
 
-	if (state)
+	mutex_lock(&indio_dev->mlock);
+	if (st->ext_sync_avail) {
+		switch (ret) {
+		case 0:
+			dds_write(st, ADI_REG_CNTRL_1, ADI_EXT_SYNC_ARM);
+			break;
+		case 1:
+			dds_write(st, ADI_REG_CNTRL_1, ADI_EXT_SYNC_DISARM);
+			break;
+		case 2:
+			dds_write(st, ADI_REG_CNTRL_1, ADI_MANUAL_SYNC_REQUEST);
+			break;
+		default:
+			ret = -EINVAL;
+		}
+	} else if (ret == 0) {
 		cf_axi_dds_start_sync(st, 0);
+	}
+	mutex_unlock(&indio_dev->mlock);
 
-	return len;
+	return ret < 0 ? ret : len;
 }
+
+static ssize_t axidds_sync_start_show(struct device *dev,
+				      struct device_attribute *attr,
+				      char *buf)
+{
+	struct iio_dev *indio_dev = dev_to_iio_dev(dev);
+	struct iio_dev_attr *this_attr = to_iio_dev_attr(attr);
+	struct cf_axi_dds_state *st = iio_priv(indio_dev);
+	u32 reg;
+
+	switch ((u32)this_attr->address) {
+	case 0:
+		reg = dds_read(st, ADI_REG_SYNC_STATUS);
+
+		return sprintf(buf, "%s\n", reg & ADI_ADC_SYNC_STATUS ?
+			axidds_sync_ctrls[0] : axidds_sync_ctrls[1]);
+	case 1:
+		if (st->ext_sync_avail)
+			return sprintf(buf, "arm disarm trigger_manual\n");
+		else
+			return sprintf(buf, "arm\n");
+	default:
+		return -EINVAL;
+	}
+
+	return -EINVAL;
+}
+
+static IIO_DEVICE_ATTR(sync_start_enable, 0644,
+		       axidds_sync_start_show,
+		       axidds_sync_start_store,
+		       0);
+
+static IIO_DEVICE_ATTR(sync_start_enable_available, 0444,
+		       axidds_sync_start_show,
+		       NULL,
+		       1);
 
 static IIO_DEVICE_ATTR(out_voltage_sampling_frequency_available, 0444,
 		       cf_axi_sampling_frequency_available,
 		       NULL,
 		       0);
 
-static IIO_DEVICE_ATTR(sync_start_enable, 0200,
-		       NULL,
-		       cf_axi_sync_start,
-		       0);
-
 static struct attribute *cf_axi_attributes[] = {
 	&iio_dev_attr_sync_start_enable.dev_attr.attr,
+	&iio_dev_attr_sync_start_enable_available.dev_attr.attr,
 	&iio_dev_attr_out_voltage_sampling_frequency_available.dev_attr.attr,
 	NULL,
 };
@@ -595,8 +671,7 @@ static int cf_axi_dds_read_raw(struct iio_dev *indio_dev,
 {
 	struct cf_axi_dds_state *st = iio_priv(indio_dev);
 	struct cf_axi_converter *conv;
-	unsigned long long val64;
-	unsigned long freq;
+	unsigned long long val64, freq;
 	unsigned int reg, channel, phase = 0;
 	int ret;
 
@@ -648,12 +723,13 @@ static int cf_axi_dds_read_raw(struct iio_dev *indio_dev,
 			break;
 
 		if (chan->type == IIO_VOLTAGE && st->interpolation_factor)
-			freq /= st->interpolation_factor;
+			do_div(freq, st->interpolation_factor);
 
-		*val = freq;
+		*val = lower_32_bits(freq);
+		*val2 = upper_32_bits(freq);
 
 		mutex_unlock(&indio_dev->mlock);
-		return IIO_VAL_INT;
+		return IIO_VAL_INT_64;
 	case IIO_CHAN_INFO_CALIBPHASE:
 		phase = 1;
 		/* fall-through */
@@ -1116,6 +1192,18 @@ static struct cf_axi_dds_chip_info cf_axi_dds_chip_info_tbl[] = {
 		.num_buf_channels = 1,
 
 	},
+	[ID_AD9783] = {
+		.name = "AD9783",
+		.channel = {
+			CF_AXI_DDS_CHAN_BUF(0),
+			CF_AXI_DDS_CHAN(0, 0, "1A"),
+			CF_AXI_DDS_CHAN(1, 0, "1B"),
+		},
+		.num_channels = 3,
+		.num_dds_channels = 2,
+		.num_buf_channels = 1,
+
+	},
 	[ID_AD9136] = {
 		.name = "AD9136",
 		.channel = {
@@ -1249,70 +1337,6 @@ static struct cf_axi_dds_chip_info cf_axi_dds_chip_info_tbl[] = {
 		.num_dp_disable_channels = 2,
 		.num_dds_channels = 4,
 		.num_buf_channels = 2,
-	},
-	[ID_AD9172_M2] = {
-		.name = "AD9172",
-		.channel = {
-			CF_AXI_DDS_CHAN_BUF_MOD(0, IIO_MOD_I, 0),
-			CF_AXI_DDS_CHAN_BUF_MOD(0, IIO_MOD_Q, 1),
-			CF_AXI_DDS_CHAN(0, 0, "TX1_I_F1"),
-			CF_AXI_DDS_CHAN(1, 0, "TX1_I_F2"),
-			CF_AXI_DDS_CHAN(2, 0, "TX1_Q_F1"),
-			CF_AXI_DDS_CHAN(3, 0, "TX1_Q_F2"),
-		},
-		.num_channels = 6,
-		.num_dp_disable_channels = 2,
-		.num_dds_channels = 4,
-		.num_buf_channels = 2,
-	},
-	[ID_AD9172_M4] = {
-		.name = "AD9172",
-		.channel = {
-			CF_AXI_DDS_CHAN_BUF_MOD(0, IIO_MOD_I, 0),
-			CF_AXI_DDS_CHAN_BUF_MOD(0, IIO_MOD_Q, 1),
-			CF_AXI_DDS_CHAN_BUF_MOD(1, IIO_MOD_I, 2),
-			CF_AXI_DDS_CHAN_BUF_MOD(1, IIO_MOD_Q, 3),
-			CF_AXI_DDS_CHAN(0, 0, "TX1_I_F1"),
-			CF_AXI_DDS_CHAN(1, 0, "TX1_I_F2"),
-			CF_AXI_DDS_CHAN(2, 0, "TX1_Q_F1"),
-			CF_AXI_DDS_CHAN(3, 0, "TX1_Q_F2"),
-			CF_AXI_DDS_CHAN(4, 0, "TX2_I_F1"),
-			CF_AXI_DDS_CHAN(5, 0, "TX2_I_F2"),
-			CF_AXI_DDS_CHAN(6, 0, "TX2_Q_F1"),
-			CF_AXI_DDS_CHAN(7, 0, "TX2_Q_F2"),
-
-		},
-		.num_channels = 12,
-		.num_dp_disable_channels = 4,
-		.num_dds_channels = 8,
-		.num_buf_channels = 4,
-	},
-	[ID_AD9172_M6] = {
-		.name = "AD9172",
-		.channel = {
-			CF_AXI_DDS_CHAN_BUF_MOD(0, IIO_MOD_I, 0),
-			CF_AXI_DDS_CHAN_BUF_MOD(0, IIO_MOD_Q, 1),
-			CF_AXI_DDS_CHAN_BUF_MOD(1, IIO_MOD_I, 2),
-			CF_AXI_DDS_CHAN_BUF_MOD(1, IIO_MOD_Q, 3),
-			CF_AXI_DDS_CHAN_BUF_MOD(2, IIO_MOD_I, 4),
-			CF_AXI_DDS_CHAN_BUF_MOD(2, IIO_MOD_Q, 5),
-			CF_AXI_DDS_CHAN(0, 0, "1A"),
-			CF_AXI_DDS_CHAN(1, 0, "1B"),
-			CF_AXI_DDS_CHAN(2, 0, "2A"),
-			CF_AXI_DDS_CHAN(3, 0, "2B"),
-			CF_AXI_DDS_CHAN(4, 0, "3A"),
-			CF_AXI_DDS_CHAN(5, 0, "3B"),
-			CF_AXI_DDS_CHAN(6, 0, "4A"),
-			CF_AXI_DDS_CHAN(7, 0, "4B"),
-			CF_AXI_DDS_CHAN(8, 0, "5A"),
-			CF_AXI_DDS_CHAN(9, 0, "5B"),
-			CF_AXI_DDS_CHAN(10, 0, "6A"),
-			CF_AXI_DDS_CHAN(11, 0, "6B"),
-		},
-		.num_channels = 18,
-		.num_dp_disable_channels = 6,
-		.num_dds_channels = 12,
-		.num_buf_channels = 6,
 	},
 };
 
@@ -1772,16 +1796,51 @@ static int cf_axi_dds_jesd204_link_supported(struct jesd204_dev *jdev,
 	return JESD204_STATE_CHANGE_DONE;
 }
 
+static int cf_axi_dds_jesd204_post_running_stage(struct jesd204_dev *jdev,
+					       enum jesd204_state_op_reason reason)
+{
+	struct device *dev = jesd204_dev_to_device(jdev);
+	struct iio_dev *indio_dev = dev_get_drvdata(dev);
+	struct cf_axi_dds_state *st = iio_priv(indio_dev);
+
+	if (reason == JESD204_STATE_OP_REASON_INIT) {
+		cf_axi_dds_start_sync(st, 0);
+		return JESD204_STATE_CHANGE_DONE;
+	}
+
+	return JESD204_STATE_CHANGE_DONE;
+
+}
+
 static const struct jesd204_dev_data jesd204_cf_axi_dds_init = {
 	.state_ops = {
 		[JESD204_OP_LINK_SUPPORTED] = {
 			.per_link = cf_axi_dds_jesd204_link_supported,
 		},
+		[JESD204_OP_OPT_POST_RUNNING_STAGE] = {
+			.per_device = cf_axi_dds_jesd204_post_running_stage,
+			.mode = JESD204_STATE_OP_MODE_PER_DEVICE,
+		},
 	},
 };
 
+struct axidds_core_info {
+	unsigned int version;
+	bool standalone;
+	bool rate_format_skip_en;
+	bool complex_modified;
+	bool issue_sync_en;
+	struct cf_axi_dds_chip_info *chip_info;
+	unsigned int data_format;
+	unsigned int rate;
+	long info_mask_separate;
+	const char *name;
+	struct iio_chan_spec device_channels[AXIDDS_MAX_NUM_CHANNELS];
+	unsigned int num_device_channels;
+};
+
 static int cf_axi_dds_setup_chip_info_tbl(struct cf_axi_dds_state *st,
-					  const char *name, bool complex)
+	const struct axidds_core_info *info)
 {
 	u32 i, c, reg, m, n, np;
 
@@ -1801,9 +1860,10 @@ static int cf_axi_dds_setup_chip_info_tbl(struct cf_axi_dds_state *st,
 		st->chip_info_generated.channel[c].type = IIO_VOLTAGE;
 		st->chip_info_generated.channel[c].output = 1;
 		st->chip_info_generated.channel[c].indexed = 1;
-		st->chip_info_generated.channel[c].modified = complex ? 1 : 0;
+		st->chip_info_generated.channel[c].modified =
+			info->complex_modified ? 1 : 0;
 		st->chip_info_generated.channel[c].channel =
-			complex ? i / 2 : i;
+			info->complex_modified ? i / 2 : i;
 		st->chip_info_generated.channel[c].channel2 =
 			(i & 1) ? IIO_MOD_Q : IIO_MOD_I;
 		st->chip_info_generated.channel[c].scan_index = i;
@@ -1818,6 +1878,9 @@ static int cf_axi_dds_setup_chip_info_tbl(struct cf_axi_dds_state *st,
 		if (reg & ADI_XBAR_ENABLE)
 			st->chip_info_generated.channel[c].ext_info =
 			axidds_ext_info;
+
+		st->chip_info_generated.channel[c].info_mask_separate |=
+			info->info_mask_separate;
 
 		st->chip_info_generated.channel[c].scan_type.realbits = n;
 		st->chip_info_generated.channel[c].scan_type.storagebits = np;
@@ -1846,32 +1909,35 @@ static int cf_axi_dds_setup_chip_info_tbl(struct cf_axi_dds_state *st,
 
 			st->chip_info_generated.channel[c].ext_info =
 				cf_axi_dds_ext_info;
-			if (i < ARRAY_SIZE(dds_extend_names))
-				st->chip_info_generated.channel[
-					c].extend_name = dds_extend_names[i];
+			if (info->complex_modified) {
+				if (i < ARRAY_SIZE(dds_extend_names_complex))
+					st->chip_info_generated.channel[c].extend_name =
+						dds_extend_names_complex[i];
+			} else {
+				if (i < ARRAY_SIZE(dds_extend_names))
+					st->chip_info_generated.channel[c].extend_name =
+						dds_extend_names[i];
+			}
 		}
+	}
+
+	st->chip_info_generated.num_dds_channels = i;
+
+	for (i = 0; i < info->num_device_channels; i++, c++) {
+		if (c > ARRAY_SIZE(st->chip_info_generated.channel))
+			return -EINVAL;
+		memcpy(&st->chip_info_generated.channel[c],
+			&info->device_channels[i],
+			sizeof(info->device_channels[0]));
 	}
 
 	st->chip_info_generated.num_channels = c;
 	st->chip_info_generated.num_dp_disable_channels = m;
-	st->chip_info_generated.num_dds_channels = i;
 	st->chip_info_generated.num_buf_channels = m;
-	st->chip_info_generated.name = name;
+	st->chip_info_generated.name = info->name;
 
 	return 0;
 }
-
-struct axidds_core_info {
-	unsigned int version;
-	bool standalone;
-	bool rate_format_skip_en;
-	bool complex_modified;
-	bool issue_sync_en;
-	struct cf_axi_dds_chip_info *chip_info;
-	unsigned int data_format;
-	unsigned int rate;
-	const char *name;
-};
 
 static const struct axidds_core_info ad9122_6_00_a_info = {
 	.version = ADI_AXI_PCORE_VER(9, 0, 'a'),
@@ -1909,6 +1975,17 @@ static const struct axidds_core_info ad9144_7_00_a_info = {
 	.version = ADI_AXI_PCORE_VER(9, 0, 'a'),
 	.rate = 1,
 	.issue_sync_en = 1,
+	.complex_modified = false,
+	.device_channels = {{
+		.type = IIO_TEMP,
+		.indexed = 1,
+		.channel = 0,
+		.scan_index = -1,
+		.info_mask_separate =
+			BIT(IIO_CHAN_INFO_PROCESSED) |
+			BIT(IIO_CHAN_INFO_CALIBBIAS),
+	}},
+	.num_device_channels = 1,
 };
 
 static const struct axidds_core_info ad9739a_8_00_b_info = {
@@ -1916,6 +1993,11 @@ static const struct axidds_core_info ad9739a_8_00_b_info = {
 	.rate = 1,
 	.data_format = ADI_DATA_FORMAT,
 	.issue_sync_en = 1,
+};
+
+static const struct axidds_core_info ad9783_1_0_info = {
+	.version = ADI_AXI_PCORE_VER(9, 0, 'b'),
+	.rate = 1,
 };
 
 static const struct axidds_core_info ad9371_6_00_a_info = {
@@ -1956,6 +2038,20 @@ static const struct axidds_core_info ad9081_1_00_a_info = {
 	.name = "AD9081",
 	.standalone = true,
 	.complex_modified = true,
+};
+
+static const struct axidds_core_info ad9081_1_00_a_real_info = {
+	.version = ADI_AXI_PCORE_VER(9, 1, 'b'),
+	.name = "AD9081",
+	.standalone = true,
+	.complex_modified = false,
+};
+
+static const struct axidds_core_info ad9172_1_00_a_info = {
+	.version = ADI_AXI_PCORE_VER(9, 1, 'b'),
+	.name = "AD917x",
+	.complex_modified = true,
+	.info_mask_separate = BIT(IIO_CHAN_INFO_SCALE),
 };
 
 static const struct axidds_core_info adrv9002_9_01_b_info = {
@@ -2004,14 +2100,20 @@ static const struct of_device_id cf_axi_dds_of_match[] = {
 	    .compatible = "adi,axi-ad9162-1.0",
 	    .data = &ad9162_1_00_a_info,
 	}, {
+	    .compatible = "adi,axi-ad9783-1.0",
+	    .data = &ad9783_1_0_info,
+	}, {
 	    .compatible = "adi,axi-ad9963-dds-1.00.a",
 	    .data = &ad9963_1_00_a_info,
 	}, {
 	    .compatible = "adi,axi-ad9172-1.0",
-	    .data = &ad9162_1_00_a_info,
+	    .data = &ad9172_1_00_a_info,
 	}, {
 	    .compatible = "adi,axi-ad9081-tx-1.0",
 	    .data = &ad9081_1_00_a_info,
+	}, {
+	    .compatible = "adi,axi-ad9081-tx-1.0-real",
+	    .data = &ad9081_1_00_a_real_info,
 	}, {
 	    .compatible = "adi,axi-adrv9002-tx-1.0",
 	    .data = &adrv9002_9_01_b_info
@@ -2087,7 +2189,7 @@ static int cf_axi_dds_probe(struct platform_device *pdev)
 	struct cf_axi_dds_state *st;
 	struct iio_dev *indio_dev;
 	struct resource *res;
-	unsigned int ctrl_2;
+	unsigned int ctrl_2, config;
 	unsigned int rate;
 	unsigned int drp_status;
 	int timeout = 100;
@@ -2128,11 +2230,13 @@ static int cf_axi_dds_probe(struct platform_device *pdev)
 		if (IS_ERR(st->clk))
 			return PTR_ERR(st->clk);
 
+		of_clk_get_scale(np, "sampl_clk", &st->clkscale);
+
 		ret = clk_prepare_enable(st->clk);
 		if (ret < 0)
 			return ret;
 
-		st->dac_clk = clk_get_rate(st->clk);
+		st->dac_clk = clk_get_rate_scaled(st->clk, &st->clkscale);
 
 		st->clk_nb.notifier_call = cf_axi_dds_rate_change;
 		clk_notifier_register(st->clk, &st->clk_nb);
@@ -2140,8 +2244,7 @@ static int cf_axi_dds_probe(struct platform_device *pdev)
 		if (info->chip_info) {
 			st->chip_info = info->chip_info;
 		} else {
-			ret = cf_axi_dds_setup_chip_info_tbl(st, info->name,
-					info->complex_modified);
+			ret = cf_axi_dds_setup_chip_info_tbl(st, info);
 			if (ret) {
 				dev_err(&pdev->dev,
 					"Invalid number of converters identified");
@@ -2168,7 +2271,18 @@ static int cf_axi_dds_probe(struct platform_device *pdev)
 
 		st->dac_clk = conv->get_data_clk(conv);
 
-		st->chip_info = &cf_axi_dds_chip_info_tbl[conv->id];
+		if (conv->id == ID_AUTO_SYNTH_PARAM) {
+			ret = cf_axi_dds_setup_chip_info_tbl(st, info);
+			if (ret) {
+				dev_err(&pdev->dev,
+					"Invalid number of converters identified");
+				return ret;
+			}
+
+			st->chip_info = &st->chip_info_generated;
+		} else {
+			st->chip_info = &cf_axi_dds_chip_info_tbl[conv->id];
+		}
 	}
 
 	/*
@@ -2185,6 +2299,9 @@ static int cf_axi_dds_probe(struct platform_device *pdev)
 	st->issue_sync_en = info->issue_sync_en;
 	st->standalone = info->standalone;
 	st->version = dds_read(st, ADI_AXI_REG_VERSION);
+
+	config = dds_read(st, ADI_REG_CONFIG);
+	st->ext_sync_avail = !!(config & ADI_EXT_SYNC);
 	st->dp_disable = false; /* FIXME: resolve later which reg & bit to read for this */
 
 	if (ADI_AXI_PCORE_VER_MAJOR(st->version) >

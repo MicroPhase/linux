@@ -37,6 +37,11 @@
 /* TODO: Determine a reasonable value */
 #define ADI_ADRV9001_READY_FOR_MCS_DELAY_US 100U
 
+#define ADI_ADRV9001_WB_MAX_NUM_UNIQUE_CALS 156
+#define ADI_ADRV9001_WB_MAX_NUM_VECTOR_TABLE_WORDS 624
+#define ADI_ADRV9001_WB_MAX_NUM_VECTOR_TABLE_BYTES 2496
+#define ADI_ADRV9001_WB_MAX_NUM_ENTRY 16384
+#define ADI_ADRV9001_WB_MAX_NUM_COEFF 6000
 
 /**
 * \brief ADRV9001 part number
@@ -178,6 +183,23 @@ typedef struct adi_adrv9001_SiliconVersion
     uint8_t minor; /*!< Minor silicon version */
 } adi_adrv9001_SiliconVersion_t;
 
+/**
+ * \brief WarmBoot InitCals Coefficients
+ */
+typedef struct adi_adrv9001_Warmboot_Coeff
+{
+	uint8_t calValue[ADI_ADRV9001_WB_MAX_NUM_UNIQUE_CALS][ADI_ADRV9001_WB_MAX_NUM_COEFF];
+} adi_adrv9001_Warmboot_Coeff_t;
+
+/**
+ * \brief WarmBoot calNumbers Information 
+ */
+typedef struct adi_adrv9001_Warmboot_CalNumbers {
+	uint8_t numberUniqueEnabledCals;                                    /*!< The Number of unique initCals enabled for this device configuration */   
+	uint8_t calNumbersEnabled[ADI_ADRV9001_WB_MAX_NUM_UNIQUE_CALS];     /*!< Array indicating the calNumber of each enabled unique initCal */   
+	uint32_t warmbootMemoryNumBytes;                                    /*!< Memory allocation required to store/retrieve the Warmboot coefficients */   
+} adi_adrv9001_Warmboot_CalNumbers_t;
+
 #ifndef CLIENT_IGNORE
 /**
 * \brief Data structure to hold a ADRV9001 device instance status information
@@ -206,8 +228,14 @@ typedef struct adi_adrv9001_Info
     uint32_t  profileAddr;												/*!< Address to load Profile */
     uint32_t  adcProfileAddr;											/*!< Address to load ADC Profile */
     uint32_t  pfirProfileAddr;                                          /*!< Address to load PFIR coefficients */
-    uint32_t  fhHopTable1Addr;                                          /*!< Address to load hop table 1 in frequency hopping mode */
-    uint32_t  fhHopTable2Addr;                                          /*!< Address to load hop table 2 in frequency hopping mode */
+    uint32_t  fhHopTableA1Addr;                                          /*!< Address to load hop table A1 in frequency hopping mode */
+    uint32_t  fhHopTableB1Addr;                                          /*!< Address to load hop table B1 in frequency hopping mode */
+	uint32_t  fhHopTableA2Addr;                                          /*!< Address to load hop table A2 in frequency hopping mode */
+	uint32_t  fhHopTableB2Addr;                                          /*!< Address to load hop table B2 in frequency hopping mode */
+	uint32_t  fhHopTableBufferA1Addr;                                    /*!< Address to load hop table A1 Buffer in frequency hopping mode */
+	uint32_t  fhHopTableBufferB1Addr;                                    /*!< Address to load hop table B1 Buffer in frequency hopping mode */
+	uint32_t  fhHopTableBufferA2Addr;                                    /*!< Address to load hop table A2 Buffer in frequency hopping mode */
+	uint32_t  fhHopTableBufferB2Addr;                                   /*!< Address to load hop table B2 Buffer in frequency hopping mode */
     uint32_t txInputRate_kHz[ADI_ADRV9001_MAX_TXCHANNELS];				/*!< Tx Input sample rate from currently loaded profile */
     uint32_t rxOutputRate_kHz[ADI_ADRV9001_MAX_RXCHANNELS];				/*!< Rx Output sample rate from currently loaded profile */
     uint32_t rx1InterfaceSampleRate_kHz;                                /*!< Rx1 Interface sample rate from currently loaded profile */
@@ -220,6 +248,8 @@ typedef struct adi_adrv9001_Info
     uint32_t currentStreamImageSize;									/*!< Image size of current stream */
     uint8_t frequencyHoppingEnabled;                                    /*!< Frequency hopping enabled flag from currently loaded profile */
     adi_adrv9001_RxGainTableType_e gainTableType[ADI_ADRV9001_MAX_RX_ONLY]; /*!< type of gain table loaded during ADRV9001 initialization */
+	uint8_t txAttenMode[ADI_ADRV9001_MAX_TXCHANNELS];					/* TX Attenuation Mode*/
+	uint32_t chProfEnMask[ADI_ADRV9001_MAX_NUM_CHANNELS];				/* Mask for enabled channels and profiles in FW format - used for warmboot*/
 } adi_adrv9001_Info_t;
 
 /**

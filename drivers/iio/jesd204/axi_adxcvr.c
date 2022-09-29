@@ -403,7 +403,7 @@ static int adxcvr_status_error(struct device *dev)
 	do {
 		mdelay(1);
 		status = adxcvr_read(st, ADXCVR_REG_STATUS);
-	} while ((timeout--) && (status == 0));
+	} while ((timeout--) && !(status & BIT(0)));
 
 	if (!(status & BIT(0))) {
 		if (!st->qpll_enable && !st->cpll_enable) {
@@ -454,20 +454,66 @@ static void adxcvr_work_func(struct work_struct *work)
 			__func__, div40_rate, ret);
 }
 
-static int adxcvr_clk_enable(struct clk_hw *hw)
+static int adxcvr_reset(struct adxcvr_state *st)
 {
-	struct adxcvr_state *st =
-		container_of(hw, struct adxcvr_state, lane_clk_hw);
 	int ret, retry = 1;
-
-	dev_dbg(st->dev, "%s: %s", __func__, st->tx_enable ? "TX" : "RX");
 
 	do {
 		adxcvr_write(st, ADXCVR_REG_RESETN, 0);
 		udelay(2);
 		adxcvr_write(st, ADXCVR_REG_RESETN, ADXCVR_RESETN);
+		dev_dbg(st->dev, "%s: %s %s Reset\n",
+			__func__,
+			adxcvr_sys_clock_sel_names[st->sys_clk_sel],
+			st->tx_enable ? "TX" : "RX");
 		ret = adxcvr_status_error(st->dev);
 	} while (ret < 0 && retry--);
+
+	return ret;
+}
+
+static int adxcvr_clk_enable(struct clk_hw *hw)
+{
+	struct adxcvr_state *st =
+		container_of(hw, struct adxcvr_state, lane_clk_hw);
+	int ret, retry = 10;
+	unsigned int status;
+	int bufstatus_err;
+
+	dev_dbg(st->dev, "%s: %s\n", __func__, st->tx_enable ? "TX" : "RX");
+
+	ret = adxcvr_reset(st);
+	if (ret < 0)
+		return ret;
+
+	if (st->xcvr.version >= ADI_AXI_PCORE_VER(17, 5, 'a')) {
+		do {
+			adxcvr_write(st, ADXCVR_REG_RESETN, ADXCVR_BUFSTATUS_RST | ADXCVR_RESETN);
+			adxcvr_write(st, ADXCVR_REG_RESETN, ADXCVR_RESETN);
+			mdelay(1);
+			status = adxcvr_read(st, ADXCVR_REG_STATUS);
+			bufstatus_err = ((status & BIT(5)) || (status & BIT(6)));
+			if (bufstatus_err) {
+				ret = adxcvr_reset(st);
+				if (ret < 0)
+					return ret;
+			}
+		} while (bufstatus_err && retry--);
+
+		if (status & BIT(5))
+			dev_err(st->dev, "%s: %s %s %s error, status: 0x%x\n",
+				__func__,
+				adxcvr_sys_clock_sel_names[st->sys_clk_sel],
+				st->tx_enable ? "TX" : "RX",
+				"buffer underflow", status);
+
+		if (status & BIT(6))
+			dev_err(st->dev, "%s: %s %s %s error, status: 0x%x\n",
+				__func__,
+				adxcvr_sys_clock_sel_names[st->sys_clk_sel],
+				st->tx_enable ? "TX" : "RX",
+				"buffer overflow", status);
+	}
 
 	return ret;
 }
@@ -864,6 +910,9 @@ static void adxcvr_parse_dt(struct adxcvr_state *st, struct device_node *np)
 
 	st->cpll_enable = st->sys_clk_sel == XCVR_CPLL;
 
+	of_property_read_u32(np, "adi,jesd204-fsm-delayed-start-ms",
+		&st->fsm_enable_delay_ms);
+
 	adxcvr_parse_dt_vco_ranges(st, np);
 }
 
@@ -943,6 +992,14 @@ static void adxcvr_device_remove_files(void *data)
 	device_remove_file(st->dev, &dev_attr_reg_access);
 }
 
+static void adxcvr_fsm_en_work(struct work_struct *work)
+{
+	struct adxcvr_state *st =
+		container_of(work, struct adxcvr_state, jesd_fsm_en_work.work);
+
+	jesd204_fsm_start(st->jdev, JESD204_LINKS_ALL);
+}
+
 static int adxcvr_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -967,12 +1024,9 @@ static int adxcvr_probe(struct platform_device *pdev)
 	 * Otional CPLL/QPLL REFCLK from a difference source
 	 * which rate and state must be in sync with the conv clk
 	 */
-	st->conv2_clk = devm_clk_get(&pdev->dev, "conv2");
-	if (IS_ERR(st->conv2_clk)) {
-		if (PTR_ERR(st->conv2_clk) != -ENOENT)
-			return PTR_ERR(st->conv2_clk);
-		st->conv2_clk = NULL;
-	}
+	st->conv2_clk = devm_clk_get_optional(&pdev->dev, "conv2");
+	if (IS_ERR(st->conv2_clk))
+		return PTR_ERR(st->conv2_clk);
 
 	st->lane_rate_div40_clk = devm_clk_get(&pdev->dev, "div40");
 	if (IS_ERR(st->lane_rate_div40_clk)) {
@@ -1116,9 +1170,15 @@ static int adxcvr_probe(struct platform_device *pdev)
 
 	devm_add_action_or_reset(st->dev, adxcvr_device_remove_files, st);
 
-	ret = jesd204_fsm_start(st->jdev, JESD204_LINKS_ALL);
-	if (ret)
-		goto unreg_eyescan;
+	if (st->fsm_enable_delay_ms) {
+		INIT_DELAYED_WORK(&st->jesd_fsm_en_work, adxcvr_fsm_en_work);
+		schedule_delayed_work(&st->jesd_fsm_en_work,
+			msecs_to_jiffies(st->fsm_enable_delay_ms));
+	} else {
+		ret = jesd204_fsm_start(st->jdev, JESD204_LINKS_ALL);
+		if (ret)
+			goto unreg_eyescan;
+	}
 
 	dev_info(&pdev->dev, "AXI-ADXCVR-%s (%d.%.2d.%c) using %s on %s at 0x%08llX. Number of lanes: %d.",
 		st->tx_enable ? "TX" : "RX",

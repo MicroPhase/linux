@@ -56,7 +56,7 @@ adjust_kcflags_against_gcc() {
 	export KCFLAGS
 }
 
-APT_LIST="make bc u-boot-tools flex bison libssl-dev"
+APT_LIST="make bc u-boot-tools flex bison libssl-dev tar kmod"
 
 if [ "$ARCH" = "arm64" ] ; then
 	if [ -z "$CROSS_COMPILE" ] ; then
@@ -189,8 +189,21 @@ build_default() {
 	APT_LIST="$APT_LIST git"
 
 	apt_update_install $APT_LIST
+
+	# make sure git does not complain about unsafe repositories when
+	# building inside docker.
+	[ -d /docker_build_dir ] && git config --global --add safe.directory /docker_build_dir
+
 	make ${DEFCONFIG}
-	make -j$NUM_JOBS $IMAGE UIMAGE_LOADADDR=0x8000
+	if [[ "${SYSTEM_PULLREQUEST_TARGETBRANCH}" =~ ^rpi-.* || "${BUILD_SOURCEBRANCH}" =~ ^refs/heads/rpi-.* \
+		|| "${BUILD_SOURCEBRANCH}" =~ ^refs/heads/staging-rpi ]]; then
+		echo "Rpi build"
+    		make -j$NUM_JOBS zImage modules dtbs
+		make INSTALL_MOD_PATH="${PWD}/modules" modules_install
+	else
+    		echo "Normal build"
+    		make -j$NUM_JOBS $IMAGE UIMAGE_LOADADDR=0x8000
+	fi
 
 	if [ "$CHECK_ALL_ADI_DRIVERS_HAVE_BEEN_BUILT" = "1" ] ; then
 		check_all_adi_files_have_been_built
@@ -215,13 +228,6 @@ build_allmodconfig() {
 }
 
 build_checkpatch() {
-	# TODO: Re-visit periodically:
-	# https://github.com/torvalds/linux/blob/master/Documentation/devicetree/writing-schema.rst
-	# This seems to change every now-n-then
-	apt_install python3-ply python-git-doc libyaml-dev python3-pip python3-setuptools
-	pip3 install wheel
-	pip3 install git+https://github.com/devicetree-org/dt-schema.git@master
-
 	local ref_branch="$(get_ref_branch)"
 
 	echo_green "Running checkpatch for commit range '$ref_branch..'"
@@ -231,13 +237,20 @@ build_checkpatch() {
 		exit 1
 	fi
 
+	# install checkpatch dependencies
+	sudo pip install ply
+
 	__update_git_ref "${ref_branch}" "${ref_branch}"
 
 	scripts/checkpatch.pl --git "${ref_branch}.." \
+		--strict \
 		--ignore FILE_PATH_CHANGES \
 		--ignore LONG_LINE \
 		--ignore LONG_LINE_STRING \
-		--ignore LONG_LINE_COMMENT
+		--ignore LONG_LINE_COMMENT \
+		--ignore PARENTHESIS_ALIGNMENT \
+		--ignore CAMELCASE \
+		--ignore UNDOCUMENTED_DT_STRING
 }
 
 build_dtb_build_test() {
@@ -326,98 +339,99 @@ __push_back_to_github() {
 	}
 }
 
+MAIN_MIRROR="xcomm_zynq"
+
+__update_main_mirror() {
+	git checkout "$MAIN_MIRROR"
+	git merge --ff-only ${ORIGIN}/${MAIN_BRANCH} || {
+		echo_red "Failed while syncing ${ORIGIN}/${MAIN_BRANCH} over '$MAIN_MIRROR'"
+		return 1
+	}
+
+	__push_back_to_github "$MAIN_MIRROR"
+	return $?
+}
+
 __handle_sync_with_main() {
 	local dst_branch="$1"
-	local method="$2"
+	local cm=$(git log --reverse --oneline ${MAIN_MIRROR}..${MAIN_BRANCH} | awk '{print $1}' | head -1)
+
+	[ -n "$cm" ] || {
+		echo_red "No commits to cherry-pick... Was "${MAIN_MIRROR}" manually updated?!"
+		return 1
+	}
 
 	__update_git_ref "$dst_branch" || {
 		echo_red "Could not fetch branch '$dst_branch'"
 		return 1
 	}
 
-	if [ "$method" = "fast-forward" ] ; then
-		git checkout FETCH_HEAD
-		git merge --ff-only ${ORIGIN}/${MAIN_BRANCH} || {
-			echo_red "Failed while syncing ${ORIGIN}/${MAIN_BRANCH} over '$dst_branch'"
-			return 1
-		}
-		__push_back_to_github "$dst_branch" || return 1
-		return 0
+	tmpfile=$(mktemp)
+
+	if [ "$CI" = "true" ] ; then
+		# setup an email account so that we can cherry-pick stuff
+		git config user.name "CSE CI"
+		git config user.email "cse-ci-notifications@analog.com"
 	fi
 
-	if [ "$method" = "cherry-pick" ] ; then
-		local depth
-		if [ "$GIT_FETCH_DEPTH" = "disabled" ] ; then
-			depth=50
-		else
-			GIT_FETCH_DEPTH=${GIT_FETCH_DEPTH:-50}
-			depth=$((GIT_FETCH_DEPTH - 1))
-		fi
-		# FIXME: kind of dumb, the code below; maybe do this a bit neater
-		local cm="$(git log "FETCH_HEAD~${depth}..FETCH_HEAD" | grep "cherry picked from commit" | head -1 | awk '{print $5}' | cut -d')' -f1)"
-		[ -n "$cm" ] || {
-			echo_red "Top commit in branch '${dst_branch}' is not cherry-picked"
+	git checkout FETCH_HEAD
+	# cherry-pick until all commits; if we get a merge-commit, handle it. Note that
+	# ~1 is because we also want ${cm} to be cherry-picked!
+	git cherry-pick -x "${cm}~1..${ORIGIN}/${MAIN_BRANCH}" 1>/dev/null 2>$tmpfile || {
+		was_a_merge=0
+		while grep -q "is a merge" $tmpfile ; do
+			was_a_merge=1
+			# clear file
+			cat /dev/null > $tmpfile
+			# retry ; we may have a new merge commit
+			git cherry-pick --continue 1>/dev/null 2>$tmpfile || {
+				was_a_merge=0
+				continue
+			}
+		done
+		if [ "$was_a_merge" != "1" ]; then
+			echo_red "Failed to cherry-pick commits '$cm..${ORIGIN}/${MAIN_BRANCH}'"
+			echo_red "$(cat $tmpfile)"
+			git cherry-pick --abort
 			return 1
-		}
-		branch_contains_commit "$cm" "${ORIGIN}/${MAIN_BRANCH}" || {
-			echo_red "Commit '$cm' is not in branch '${MAIN_BRANCH}'"
-			return 1
-		}
-		# Make sure that we are adding something new, or cherry-pick complains
-		if git diff --quiet "$cm" "${ORIGIN}/${MAIN_BRANCH}" ; then
-			return 0
 		fi
-
-		tmpfile=$(mktemp)
-
-		if [ "$CI" = "true" ] ; then
-			# setup an email account so that we can cherry-pick stuff
-			git config user.name "CSE CI"
-			git config user.email "cse-ci-notifications@analog.com"
-		fi
-
-		git checkout FETCH_HEAD
-		# cherry-pick until all commits; if we get a merge-commit, handle it
-		git cherry-pick -x "${cm}..${ORIGIN}/${MAIN_BRANCH}" 1>/dev/null 2>$tmpfile || {
-			was_a_merge=0
-			while grep -q "is a merge" $tmpfile ; do
-				was_a_merge=1
-				# clear file
-				cat /dev/null > $tmpfile
-				# retry ; we may have a new merge commit
-				git cherry-pick --continue 1>/dev/null 2>$tmpfile || {
-					was_a_merge=0
-					continue
-				}
-			done
-			if [ "$was_a_merge" != "1" ]; then
-				echo_red "Failed to cherry-pick commits '$cm..${ORIGIN}/${MAIN_BRANCH}'"
-				echo_red "$(cat $tmpfile)"
-				return 1
-			fi
-		}
-		__push_back_to_github "$dst_branch" || return 1
-		return 0
-	fi
+	}
+	__push_back_to_github "$dst_branch" || return 1
+	return 0
 }
 
 build_sync_branches_with_main() {
 	GIT_FETCH_DEPTH=50
-	BRANCHES="xcomm_zynq:fast-forward adi-5.10.0:cherry-pick"
-	BRANCHES="$BRANCHES rpi-5.10.y:cherry-pick"
+	BRANCHES="adi-5.10.0 rpi-5.10.y"
 
 	__update_git_ref "$MAIN_BRANCH" "$MAIN_BRANCH" || {
 		echo_red "Could not fetch branch '$MAIN_BRANCH'"
 		return 1
 	}
 
+	# needed for __handle_sync_with_main() so we can properly get the list
+	# of commits to cherry-pick
+	__update_git_ref "$MAIN_MIRROR" "$MAIN_MIRROR" || {
+		echo_red "Could not fetch branch '$MAIN_MIRROR'"
+		return 1
+	}
+
 	for branch in $BRANCHES ; do
-		local dst_branch="$(echo $branch | cut -d: -f1)"
-		[ -n "$dst_branch" ] || break
-		local method="$(echo $branch | cut -d: -f2)"
-		[ -n "$method" ] || break
-		__handle_sync_with_main "$dst_branch" "$method"
+		__handle_sync_with_main "$branch" || {
+			# In case cherry-picking fails, we need to still make sure that our mirror
+			# get's updated. Otherwise in the next time this job is called, we will
+			# have commits to cherry-pick that do not belong to this call... Furthermore
+			# at this stage the cherry-pick needs to be handled manually. Note that,
+			# in theory, the cherry-pick should never fail for the ADI rebased branch
+			# (adi-${kernerversion}) but that is not true for the pi branch where it can
+		        # fail and where it might actually be acceptable to fail (when touching in
+			# xilinx specific code that we do not care in pi platforms).
+			__update_main_mirror "$MAIN_MIRROR"
+			return 1
+		}
 	done
+
+	__update_main_mirror "$MAIN_MIRROR"
 }
 
 ORIGIN=${ORIGIN:-origin}

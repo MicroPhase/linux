@@ -1,4 +1,13 @@
-
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Analog Devices AD-FMCADC5-EBZ
+ * https://wiki.analog.com/resources/eval/user-guides/ad-fmcadc5-ebz
+ *
+ * hdl_project: <fmcadc5/vc707>
+ * board_revision: <>
+ *
+ * Copyright (C) 2014-2021 Analog Devices Inc.
+ */
 /dts-v1/;
 
 #include "vc707.dtsi"
@@ -129,19 +138,6 @@
 		reg = <0x7c420000 0x10000>;
 		#dma-cells = <1>;
 		clocks = <&clk_bus_0>;
-
-		adi,channels {
-			#size-cells = <0>;
-			#address-cells = <1>;
-
-			dma-channel@0 {
-				reg = <0>;
-				adi,source-bus-width = <64>;
-				adi,source-bus-type = <1>;
-				adi,destination-bus-width = <64>;
-				adi,destination-bus-type = <0>;
-			};
-		};
 	};
 };
 

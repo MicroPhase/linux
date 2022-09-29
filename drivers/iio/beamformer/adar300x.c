@@ -182,9 +182,7 @@
 	.channel = (_num),					\
 	.address = (_id),					\
 	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |		\
-			      BIT(IIO_CHAN_INFO_SCALE) |	\
-			      BIT(IIO_CHAN_INFO_LABEL),		\
-	.label_name = name,					\
+			      BIT(IIO_CHAN_INFO_SCALE),		\
 	.scan_index = (_id),					\
 	.scan_type = {						\
 		.sign = 'u',					\
@@ -202,9 +200,7 @@
 	.channel = (_num),					\
 	.address = (_id),					\
 	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |		\
-			      BIT(IIO_CHAN_INFO_SCALE) |	\
-			      BIT(IIO_CHAN_INFO_LABEL),		\
-	.label_name = name,					\
+			      BIT(IIO_CHAN_INFO_SCALE),		\
 	.scan_index = (_id),					\
 	.scan_type = {						\
 		.sign = 'u',					\
@@ -690,7 +686,7 @@ static int adar300x_get_mem_value(struct iio_dev *indio_dev,
 
 	adar300x_unpack_data(packed, unpacked, ADAR300x_UNPACKED_BEAMSTATE_LEN);
 
-	*val = unpacked[chan->address];
+	*val = unpacked[chan->address % st->chip_info->unpacked_beamst_len];
 
 err_unlock:
 	mutex_unlock(&st->lock);
@@ -1568,8 +1564,19 @@ static int adar300x_probe(struct spi_device *spi, const struct attribute_group *
 		return PTR_ERR(regmap);
 	}
 
-	gpio_reset = devm_gpiod_get(&spi->dev, "reset", GPIOD_OUT_LOW);
-	if (!IS_ERR(gpio_reset))
+	gpio_reset = devm_gpiod_get_optional(&spi->dev, "reset", GPIOD_OUT_LOW);
+	/*
+	 * Test for EBUSY to check if other ADAR300x devices are defined on the same reset line,
+	 * this is a valid case
+	 */
+	if (IS_ERR(gpio_reset) && PTR_ERR(gpio_reset) != -EBUSY)
+		return PTR_ERR(gpio_reset);
+
+	/*
+	 * Only one reset is needed for all devices connected on the same reset line, so check for
+	 * EBUSY to determine if GPIO was allready got and used before
+	 */
+	if (gpio_reset && PTR_ERR(gpio_reset) != -EBUSY)
 		ad300x_reset(gpio_reset);
 
 	for_each_available_child_of_node(np, child) {

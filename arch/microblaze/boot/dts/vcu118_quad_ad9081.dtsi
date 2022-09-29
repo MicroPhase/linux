@@ -36,7 +36,7 @@
 };
 
 &amba_pl {
-		axi_spi2: axi_quad_spi@44a80000 {
+		axi_spi2: spi@44a80000 {
 			#address-cells = <1>;
 			#size-cells = <0>;
 			bits-per-word = <8>;
@@ -50,7 +50,7 @@
 			xlnx,spi-mode = <0>;
 		};
 
-		axi_spi3: axi_quad_spi@44B80000 {
+		axi_spi3: spi@44B80000 {
 			#address-cells = <1>;
 			#size-cells = <0>;
 			bits-per-word = <8>;
@@ -71,21 +71,7 @@
 			#clock-cells = <0>;
 			interrupt-parent = <&axi_intc>;
 			interrupts = <12 4>;
-
 			clocks = <&clk_bus_0>;
-
-			adi,channels {
-				#size-cells = <0>;
-				#address-cells = <1>;
-
-				dma-channel@0 {
-					reg = <0>;
-					adi,source-bus-width = <256>;
-					adi,source-bus-type = <2>;
-					adi,destination-bus-width = <256>;
-					adi,destination-bus-type = <0>;
-				};
-			};
 		};
 
 		tx_dma: dma@7c430000  {
@@ -96,19 +82,6 @@
 			interrupt-parent = <&axi_intc>;
 			interrupts = <13 4>;
 			clocks = <&clk_bus_0>;
-
-			adi,channels {
-				#size-cells = <0>;
-				#address-cells = <1>;
-
-				dma-channel@0 {
-					reg = <0>;
-					adi,source-bus-width = <256>;
-					adi,source-bus-type = <0>;
-					adi,destination-bus-width = <256>;
-					adi,destination-bus-type = <2>;
-				};
-			};
 		};
 
 		axi_ad9081_core_rx: axi-ad9081-rx-3@44a10000 {
@@ -270,15 +243,6 @@
 		gpios = <34 GPIO_ACTIVE_HIGH>;
 		output-high; /* output-low for the RF2 <-> clk-rfaux8 output */
 		line-name = "ADRF5020_CTRL";
-	};
-};
-
-&axi_gpio_2 {
-	ad9081_gpio0_mux {
-		gpio-hog;
-		gpios = <44 GPIO_ACTIVE_HIGH>;
-		output-high; /* output-high gpio_mode - connect GPIO_0 of MxFE3 (output) to GPIO_0 of MxFE0,1,2 (input) */
-		line-name = "GPIO_0 HDL mux mode";
 	};
 };
 
@@ -624,4 +588,6 @@
 	rx1-enable-gpios = <&axi_gpio 48 0>;
 	tx2-enable-gpios = <&axi_gpio 60 0>;
 	tx1-enable-gpios = <&axi_gpio 56 0>;
+	/* output-high gpio_mode - connect GPIO_0 of MxFE3 (output) to GPIO_0 of MxFE0,1,2 (input) */
+	ms-sync-enable-gpios = <&axi_gpio_2 44 GPIO_ACTIVE_HIGH>;
 };

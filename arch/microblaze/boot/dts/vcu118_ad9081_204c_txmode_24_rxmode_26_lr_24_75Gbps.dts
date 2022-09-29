@@ -27,26 +27,6 @@
 	adi,out-clk-select = <XCVR_REFCLK>;
 };
 
-&rx_dma {
-	adi,channels {
-		dma-channel@0 {
-			reg = <0>;
-			adi,source-bus-type = <2>;
-			adi,destination-bus-type = <0>;
-		};
-	};
-};
-
-&tx_dma {
-	adi,channels {
-		dma-channel@0 {
-			reg = <0>;
-			adi,source-bus-type = <0>;
-			adi,destination-bus-type = <2>;
-		};
-	};
-};
-
 &hmc7044 {
 
 	adi,pll2-output-frequency = <3000000000>;
@@ -192,25 +172,25 @@
 				reg = <0>;
 				adi,decimation = <2>;
 				adi,nco-frequency-shift-hz =  /bits/ 64 <400000000>;
-				adi,nco-mode = <AD9081_ADC_NCO_VIF>;
+				adi,nco-mixer-mode = <AD9081_ADC_NCO_VIF>;
 			};
 			ad9081_adc1: adc@1 {
 				reg = <1>;
 				adi,decimation = <2>;
 				adi,nco-frequency-shift-hz =  /bits/ 64 <(-400000000)>;
-				adi,nco-mode = <AD9081_ADC_NCO_VIF>;
+				adi,nco-mixer-mode = <AD9081_ADC_NCO_VIF>;
 			};
 			ad9081_adc2: adc@2 {
 				reg = <2>;
 				adi,decimation = <2>;
 				adi,nco-frequency-shift-hz =  /bits/ 64 <400000000>;
-				adi,nco-mode = <AD9081_ADC_NCO_VIF>;
+				adi,nco-mixer-mode = <AD9081_ADC_NCO_VIF>;
 			};
 			ad9081_adc3: adc@3 {
 				reg = <3>;
 				adi,decimation = <2>;
 				adi,nco-frequency-shift-hz =  /bits/ 64 <(-400000000)>;
-				adi,nco-mode = <AD9081_ADC_NCO_VIF>;
+				adi,nco-mixer-mode = <AD9081_ADC_NCO_VIF>;
 			};
 		};
 		adi,channelizer-paths {

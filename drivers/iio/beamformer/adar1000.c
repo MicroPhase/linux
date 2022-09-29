@@ -507,9 +507,11 @@ static void adar1000_phase_search(struct adar1000_state *st, int val, int val2,
 {
 	int i, prev, next;
 
-	val %= 360;
+	if (val > 360)
+		val = 360;
+
 	if (val < 0)
-		val += 360;
+		val = 0;
 
 	for (i = 0; i < st->pt_size - 1; i++) {
 		if (st->pt_info[i].val > val)
@@ -601,13 +603,9 @@ static int adar1000_read_raw(struct iio_dev *indio_dev,
 		if (ret < 0)
 			return ret;
 
-		*val = -1 * (ret / 1000);
-		*val2 = (ret % 1000) * 1000;
+		*val = ret;
 
-		if (!*val)
-			*val2 *= -1;
-
-		return IIO_VAL_INT_PLUS_MICRO;
+		return IIO_VAL_INT;
 	case IIO_CHAN_INFO_PHASE:
 		return adar1000_get_phase(st, chan->channel, chan->output,
 					  val, val2);
@@ -1989,7 +1987,7 @@ static ssize_t adar1000_read_enable(struct iio_dev *indio_dev,
 		if (ret < 0)
 			return ret;
 
-		val = (val & 0xf) & (0x8 >> chan->channel);
+		val = !!((val & 0xf) & (0x8 >> chan->channel));
 
 		break;
 	case ADAR1000_PA_BIAS_ON:

@@ -30,6 +30,7 @@ static unsigned int jesd204_device_count;
 static unsigned int jesd204_topologies_count;
 
 static unsigned int jesd204_con_id_counter;
+static bool jesd204_dyn_dt_change;
 
 static void jesd204_dev_unregister(struct jesd204_dev *jdev);
 
@@ -274,6 +275,10 @@ void jesd204_copy_link_params(struct jesd204_link *dst,
 	dst->dac_adj_resolution_steps = src->dac_adj_resolution_steps;
 	dst->dac_adj_direction = src->dac_adj_direction;
 	dst->dac_phase_adj = src->dac_phase_adj;
+	dst->sysref.mode = dst->sysref.mode;
+	dst->sysref.capture_falling_edge = dst->sysref.capture_falling_edge;
+	dst->sysref.valid_falling_edge = dst->sysref.valid_falling_edge;
+	dst->sysref.lmfc_offset = dst->sysref.lmfc_offset;
 }
 EXPORT_SYMBOL_GPL(jesd204_copy_link_params);
 
@@ -934,10 +939,13 @@ static struct jesd204_dev *jesd204_dev_register(struct device *dev,
 	}
 
 	jdev = jesd204_dev_find_by_of_node(dev->of_node);
-	if (!jdev) {
+	if (!jdev && !jesd204_dyn_dt_change) {
 		dev_err(dev, "Device has no configuration node\n");
 		return ERR_PTR(-ENODEV);
 	}
+
+	if (jesd204_dyn_dt_change)
+		return ERR_PTR(-EPROBE_DEFER);
 
 	ret = jesd204_dev_init_links_data(dev, jdev, init);
 	if (ret)
@@ -1068,6 +1076,84 @@ struct jesd204_dev *devm_jesd204_dev_register(struct device *dev,
 }
 EXPORT_SYMBOL_GPL(devm_jesd204_dev_register);
 
+
+static int jesd204_overlay_has_device(struct device_node *node)
+{
+	struct device_node *dn;
+	int i = 0;
+
+	for_each_available_child_of_node(node, dn) {
+		if (of_property_read_bool(dn, "jesd204-device"))
+			i++;
+	}
+
+	return i;
+}
+
+/**
+ * of_jesd204_notify - reconfig notifier for dynamic DT changes
+ * @nb:		notifier block
+ * @action:	notifier action
+ * @arg:	reconfig data
+ *
+ */
+static int of_jesd204_notify(struct notifier_block *nb,
+				 unsigned long action, void *arg)
+{
+	struct of_overlay_notify_data *nd = arg;
+	int devs, ret =  0;
+
+	switch (action) {
+	case OF_OVERLAY_PRE_APPLY:
+		pr_debug("%s OF_OVERLAY_PRE_APPLY\n", __func__);
+
+		devs = jesd204_overlay_has_device(nd->overlay);
+		if (!devs)
+			return NOTIFY_OK;
+
+		if (jesd204_device_count || jesd204_topologies_count) {
+			pr_err("%s Failed: base devicetree must not have any jesd204-devices",
+				__func__);
+			return notifier_from_errno(-EOPNOTSUPP);
+		}
+
+		jesd204_dyn_dt_change = true;
+
+		return NOTIFY_OK;
+	case OF_OVERLAY_POST_APPLY:
+		pr_debug("%s OF_OVERLAY_POST_APPLY\n", __func__);
+
+		if (jesd204_dyn_dt_change) {
+			ret = jesd204_of_create_devices();
+
+			pr_info("found %u devices and %u topologies\n",
+				jesd204_device_count, jesd204_topologies_count);
+
+			jesd204_dyn_dt_change = false;
+			if (!ret)
+				driver_deferred_probe_trigger();
+
+			return notifier_from_errno(ret);
+		}
+
+		return NOTIFY_OK;
+	case OF_OVERLAY_PRE_REMOVE:
+		pr_debug("%s OF_OVERLAY_PRE_REMOVE\n", __func__);
+
+		if (jesd204_device_count)
+			return notifier_from_errno(-EOPNOTSUPP);
+
+		return NOTIFY_OK;
+	default:
+		pr_debug("%s Not implemented action: %ld\n", __func__, action);
+		return NOTIFY_OK;
+	}
+}
+
+static struct notifier_block jesd204_of_nb = {
+	.notifier_call = of_jesd204_notify,
+};
+
 static int __init jesd204_init(void)
 {
 	int ret;
@@ -1084,6 +1170,10 @@ static int __init jesd204_init(void)
 	if (ret < 0)
 		goto error_unreg_devices;
 
+	ret = of_overlay_notifier_register(&jesd204_of_nb);
+	if (ret)
+		return ret;
+
 	pr_info("found %u devices and %u topologies\n",
 		jesd204_device_count, jesd204_topologies_count);
 
@@ -1099,6 +1189,7 @@ static void __exit jesd204_exit(void)
 {
 	jesd204_of_unregister_devices();
 	bus_unregister(&jesd204_bus_type);
+	of_overlay_notifier_unregister(&jesd204_of_nb);
 }
 
 subsys_initcall(jesd204_init);

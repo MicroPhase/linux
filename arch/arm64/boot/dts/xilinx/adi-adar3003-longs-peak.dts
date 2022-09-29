@@ -5,16 +5,16 @@
  * Copyright (C) 2018-2019 Analog Devices Inc.
  */
 
-#include "zynqmp-zcu102-rev1.0.dts"
+#include "zynqmp-zcu102-rev10-ad9081-m8-l4.dts"
 
 / {
-	long_peack_control@0 {
+	long_peak_control@0 {
 		compatible = "adi,one-bit-adc-dac";
 		#address-cells = <1>;
 		#size-cells = <0>;
 		// 78 offset
-		out-gpios = <&gpio 110 0>, <&gpio 112 0>, <&gpio 113 0>;
-		label = "long_peack_control";
+		out-gpios = <&gpio 138 0>, <&gpio 140 0>, <&gpio 141 0>;
+		label = "long_peak_control";
 
 		channel@0 {
 			reg = <0>;
@@ -31,10 +31,48 @@
 	};
 };
 
-&spi0 {
-	status = "okay";
-	num-cs = <8>;
-	is-decoded-cs = <1>;
+&fpga_axi {
+	axi_spi_pmod: spi@84000000 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		bits-per-word = <8>;
+		compatible = "xlnx,xps-spi-2.00.a";
+		fifo-size = <16>;
+		// 3 + 121 - 32
+		interrupts = <0 92 IRQ_TYPE_LEVEL_HIGH>;
+		num-cs = <0x8>;
+		reg = <0x84000000 0x10000>;
+		xlnx,num-ss-bits = <0x8>;
+		xlnx,spi-mode = <0>;
+	};
+	axi_i2c_pmod: i2c@84500000 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		clock-names = "s_axi_aclk";
+		clocks = <&zynqmp_clk 71>;
+		compatible = "xlnx,axi-iic-2.0", "xlnx,xps-iic-2.00.a";
+		interrupt-names = "iic2intc_irpt";
+		interrupts = <0 93 IRQ_TYPE_LEVEL_HIGH>;
+		reg = <0x84500000 0x1000>;
+	};
+};
+
+&axi_i2c_pmod {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	i2c_eeprom1: eeprom@50 {
+		compatible = "atmel,24c32";
+		reg = <0x50>;
+		pagesize = <32>;
+	};
+	i2c_eeprom2: eeprom@51 {
+		compatible = "atmel,24c32";
+		reg = <0x51>;
+		pagesize = <32>;
+	};
+};
+
+&axi_spi_pmod {
 	adar3003_T0: adar3003_0@0 {
 		compatible = "adi,adar3003";
 		reg = <0>;
@@ -42,7 +80,7 @@
 		label = "adar3003_T0";
 		#address-cells = <1>;
 		#size-cells = <0>;
-		reset-gpios = <&gpio 111 0>;
+		reset-gpios = <&gpio 139 0>;
 
 		adar3003_0@0 {
 			reg = <0>;
@@ -120,7 +158,7 @@
 		label = "adar3003_T1";
 		#address-cells = <1>;
 		#size-cells = <0>;
-		reset-gpios = <&gpio 111 0>;
+		reset-gpios = <&gpio 139 0>;
 
 		adar3003_0@0 {
 			reg = <0>;
@@ -198,7 +236,7 @@
 		label = "adar3003_T2";
 		#address-cells = <1>;
 		#size-cells = <0>;
-		reset-gpios = <&gpio 111 0>;
+		reset-gpios = <&gpio 139 0>;
 
 		adar3003_0@0 {
 			reg = <0>;
@@ -276,7 +314,7 @@
 		label = "adar3003_T3";
 		#address-cells = <1>;
 		#size-cells = <0>;
-		reset-gpios = <&gpio 111 0>;
+		reset-gpios = <&gpio 139 0>;
 
 		adar3003_0@0 {
 			reg = <0>;

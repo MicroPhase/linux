@@ -29,6 +29,10 @@ extern "C" {
 
 #define ADI_ADRV9001_RX_GAIN_INDEX_MIN 187
 #define ADI_ADRV9001_RX_GAIN_INDEX_MAX 255
+#define RX1_INTERFACE_GAIN_SEED_ADDR            0x2001FFD0
+#define RX2_INTERFACE_GAIN_SEED_ADDR            0x2001FFD4
+#define RX1_INTERFACE_GAIN_END_OF_FRAME_ADDR    0x2001FFD8
+#define RX2_INTERFACE_GAIN_END_OF_FRAME_ADDR    0x2001FFDC
 
 /**
 *  \brief Rx gain table SRAM base addresses
@@ -128,8 +132,14 @@ typedef enum adi_adrv9001_rxManualGainPeakPowerSignalSel
 typedef struct adi_adrv9001_RxInterfaceGainCtrl
 {
     adi_adrv9001_RxInterfaceGainUpdateTiming_e  updateInstance;
-    adi_adrv9001_RxInterfaceGainCtrlMode_e controlMode;
-    adi_adrv9001_RxInterfaceGain_e         gain;
+    adi_adrv9001_RxInterfaceGainCtrlMode_e      controlMode;
+    adi_adrv9001_RxInterfaceGain_e              gain;
+    uint8_t rssiDuration;                                           /* Duration of RSSI measurement (unit = 1ms/255 ) */
+    uint8_t rssiMovingAverageDuration;                              /* Number of measurements in RSSI Moving-Average window */
+    int8_t gainControlAutomaticThreshold_dBFS;                      /* Max signal level target in dBFS */
+	uint8_t signalPAR;                                              /* Peak to Average Ratio of applied signal */
+	bool enableFastAttack;                                          /* false: fastAttack and tracking use same configuration of MovingAveragefilter, true: No MovingAveragefilter in fastAttack region */
+
 } adi_adrv9001_RxInterfaceGainCtrl_t;
 
 typedef enum adi_adrv9001_AdcTypeSwitchMode
@@ -170,8 +180,18 @@ typedef struct adi_adrv9001_RxPortSwitchCfg
     uint64_t  minFreqPortB_Hz;
     uint64_t  maxFreqPortB_Hz;
     bool      enable;
+    bool      manualRxPortSwitch;
 } adi_adrv9001_RxPortSwitchCfg_t;
-
+    
+/**
+ * \brief Structure which holds the LOID configuration parameters
+ */
+typedef struct adi_adrv9001_RxrfdcLoidCfg
+{
+	bool loidEnable;								/* LOID enable flag for RX1 and RX2 */
+	uint8_t loidThreshold_negdBFS;				    /* Threshold for LO detection (in -dBFS) */  
+} adi_adrv9001_RxrfdcLoidCfg_t ;	
+    
 #ifdef __cplusplus
 }
 #endif
