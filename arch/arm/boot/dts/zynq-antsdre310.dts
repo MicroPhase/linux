@@ -10,15 +10,29 @@
  * Copyright 2015-2019 Analog Devices Inc.
  */
 /dts-v1/;
-#include "zynq-antsdre200.dtsi"
+#include "zynq-antsdre310.dtsi"
 
 / {
 	leds {
 		compatible = "gpio-leds";
 		led0 {
 			label = "led0:green";
-			gpios = <&gpio0 0 0>;
+			gpios = <&gpio0 15 0>;
 			linux,default-trigger = "heartbeat";
 		};
+	};
+
+	gpio_keys {
+		compatible = "gpio-keys";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		button {
+			interrupt-parent = <&gpio0>;
+			interrupts = <14 IRQ_TYPE_EDGE_FALLING>;
+			label = "Button";
+			linux,code = <BTN_MISC>;
+		};
+
 	};
 };
