@@ -26,6 +26,7 @@
 		serial0 = &uart1;
 		spi0 = &qspi;
 		mmc0 = &sdhci0;
+		usb0 = &usb0;
 	};
 
 	chosen {
@@ -86,7 +87,6 @@
 	xlnx,phy-reset-gpio = <&gpio0 47 0>;
 	dr_mode = "otg";
 	status = "okay";
-	usb-phy = <&usb_phy0>;
 };
 
 &qspi {
