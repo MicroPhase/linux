@@ -61,9 +61,9 @@
 	ltc2630 {
 		compatible = "microphase,ltc2630";
 		status = "okay";
-		ext_ref_locked = <&gpio0 68 1>;
-		ext_ref_ispps = <&gpio0 69 0>;
-		ref_sel = <&gpio0 70 0>;
+		ext_ref_locked = <&gpio0 86 1>;
+		ext_ref_ispps = <&gpio0 87 0>;
+		ref_sel = <&gpio0 88 0>;
 	};
 };
 
@@ -469,10 +469,10 @@
 
 		/* Control GPIOs */
 
-		en_agc-gpios = <&gpio0 98 0>;
-		sync-gpios = <&gpio0 99 0>;
-		reset-gpios = <&gpio0 100 0>;
-		enable-gpios = <&gpio0 101 0>;
-		txnrx-gpios = <&gpio0 102 0>;
+		en_agc-gpios = <&gpio0 66 0>;
+		sync-gpios = <&gpio0 67 0>;
+		reset-gpios = <&gpio0 68 0>;
+		enable-gpios = <&gpio0 69 0>;
+		txnrx-gpios = <&gpio0 70 0>;
 	};
 };
