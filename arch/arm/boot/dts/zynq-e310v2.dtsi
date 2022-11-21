@@ -50,21 +50,6 @@
 		enable-gpios = <&gpio0 105 0>; /* Set to 1 for extern AD9361_CLK (J1 on PZSDRCC-FMC) */
 		clock-output-names = "ad9361_ext_refclk";
 	};
-
-	usb_ulpi_clk: usb-ulpe-gpio-gate@0 {
-		#clock-cells = <0>;
-		compatible = "gpio-gate-clock";
-		clocks = <&usb_ulpi_fixed_clk>;
-		enable-gpios = <&gpio0 9 1>; /* Active  Low */
-	};
-
-	ltc2630 {
-		compatible = "microphase,ltc2630";
-		status = "okay";
-		ext_ref_locked = <&gpio0 86 1>;
-		ext_ref_ispps = <&gpio0 87 0>;
-		ref_sel = <&gpio0 88 0>;
-	};
 };
 
 &uart0 {
