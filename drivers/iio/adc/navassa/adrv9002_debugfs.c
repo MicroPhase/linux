@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0
 /*
  * ADRV9002 debugfs interface
  *
@@ -241,6 +241,7 @@ void adrv9002_debugfs_agc_config_create(struct adrv9002_rx_chan *rx, struct dent
 	const char *attr = adrv9002_agc_get_attr(rx->channel.number, member); \
 	debugfs_create_bool(attr, 0600, d, &rx->agc.member); \
 }
+
 	adrv9002_agc_add_file_u8(peakWaitTime);
 	adrv9002_agc_add_file_u8(maxGainIndex);
 	adrv9002_agc_add_file_u8(minGainIndex);
@@ -366,23 +367,23 @@ static int adrv9002_pll_status_show(struct seq_file *s, void *ignored)
 					       ADI_ADRV9001_PLL_LO1, &lo1);
 
 	ret = adi_adrv9001_Radio_PllStatus_Get(phy->adrv9001,
-	                                       ADI_ADRV9001_PLL_LO2, &lo2);
+					       ADI_ADRV9001_PLL_LO2, &lo2);
 	if (ret)
 		goto error;
 
 	ret = adi_adrv9001_Radio_PllStatus_Get(phy->adrv9001,
-	                                       ADI_ADRV9001_PLL_AUX, &aux);
+					       ADI_ADRV9001_PLL_AUX, &aux);
 	if (ret)
 		goto error;
 
 	ret = adi_adrv9001_Radio_PllStatus_Get(phy->adrv9001,
-	                                       ADI_ADRV9001_PLL_CLK, &clk);
+					       ADI_ADRV9001_PLL_CLK, &clk);
 	if (ret)
 		goto error;
 
 	ret = adi_adrv9001_Radio_PllStatus_Get(phy->adrv9001,
-	                                       ADI_ADRV9001_PLL_CLK_LP,
-	                                       &clk_lp);
+					       ADI_ADRV9001_PLL_CLK_LP,
+					       &clk_lp);
 	if (ret)
 		goto error;
 	mutex_unlock(&phy->lock);
@@ -889,30 +890,33 @@ static const struct file_operations adrv9002_api_version_get_fops = {
 	.read = adrv9002_api_version_get,
 	.llseek = default_llseek,
 };
+
 static const char * const dgpio_str[] = {
 	"Unassigned", "dgpio0", "dgpio1", "dgpio2", "dgpio3", "dgpio4", "dgpio5",
 	"dgpio6", "dgpio7", "dgpio8", "dgpio9", "dgpio10", "dgpio11", "dgpio12", "dgpio13",
 	"dgpio14", "dgpio15"
 };
 
-static void adrv9002_fh_gain_config_dump_show(struct seq_file *s, const adi_adrv9001_FhCfg_t *cfg)
+static void adrv9002_fh_gain_config_dump_show(struct seq_file *s, const adi_adrv9001_FhCfg_t *cfg,
+					      int chan)
 {
-	const adi_adrv9001_FhGainSetupByPinCfg_t *gain = &cfg->gainSetupByPinConfig;
+	const adi_adrv9001_FhGainSetupByPinCfg_t *gain = &cfg->gainSetupByPinConfig[chan];
 	int e;
 
-	adrv9002_seq_printf(s, &cfg->gainSetupByPinConfig, numRxGainTableEntries);
+	seq_printf(s, "Gain Pin Config channel(%d):\n", chan);
+	adrv9002_seq_printf(s, &cfg->gainSetupByPinConfig[chan], numRxGainTableEntries);
 	seq_puts(s, "RX Gain Table: ");
 	for (e = 0; e < gain->numRxGainTableEntries; e++)
 		seq_printf(s, "%u ", gain->rxGainTable[e]);
 	seq_puts(s, "\n");
 
-	adrv9002_seq_printf(s, &cfg->gainSetupByPinConfig, numTxAttenTableEntries);
+	adrv9002_seq_printf(s, &cfg->gainSetupByPinConfig[chan], numTxAttenTableEntries);
 	seq_puts(s, "TX Atten Table: ");
 	for (e = 0; e < gain->numTxAttenTableEntries; e++)
 		seq_printf(s, "%u ", gain->txAttenTable[e]);
 	seq_puts(s, "\n");
 
-	adrv9002_seq_printf(s, &cfg->gainSetupByPinConfig, numGainCtrlPins);
+	adrv9002_seq_printf(s, &cfg->gainSetupByPinConfig[chan], numGainCtrlPins);
 	seq_puts(s, "Gain Select Pins: ");
 	for (e = 0; e < gain->numGainCtrlPins; e++)
 		seq_printf(s, "%s ", dgpio_str[gain->gainSelectGpioConfig[e].pin]);
@@ -961,8 +965,12 @@ static int adrv9002_fh_config_dump_show(struct seq_file *s, void *ignored)
 	if (cfg.numTableIndexPins)
 		seq_puts(s, "\n");
 	adrv9002_seq_printf(s, &cfg, gainSetupByPin);
-	if (cfg.gainSetupByPin)
-		adrv9002_fh_gain_config_dump_show(s, &cfg);
+	if (cfg.gainSetupByPin) {
+		int c;
+
+		for (c = 0; c < ADRV9002_CHANN_MAX; c++)
+			adrv9002_fh_gain_config_dump_show(s, &cfg, c);
+	}
 
 	return 0;
 }
@@ -986,11 +994,12 @@ static int adrv9002_hop_table_dump_show(struct seq_file *s, int hop, int tbl_idx
 	}
 
 	if (read_back)
-		seq_puts(s, "hop_freq_hz rx1_off_freq_hz rx2_off_freq_hz rx_gain tx_atten\n");
+		seq_puts(s, "hop_freq_hz rx1_off_freq_hz rx2_off_freq_hz rx1_gain tx1_atten rx2_gain tx2_atten\n");
 	for (e = 0; e < read_back; e++) {
-		seq_printf(s, "%-11llu %-15d %-15d %-7u %u\n", tbl[e].hopFrequencyHz,
+		seq_printf(s, "%-11llu %-15d %-15d %-8u %-9u %-8u %u\n", tbl[e].hopFrequencyHz,
 			   tbl[e].rx1OffsetFrequencyHz, tbl[e].rx2OffsetFrequencyHz,
-			   tbl[e].rxGainIndex, tbl[e].txAttenuation_mdB);
+			   tbl[e].rx1GainIndex, tbl[e].tx1Attenuation_fifthdB,
+			   tbl[e].rx2GainIndex, tbl[e].tx2Attenuation_fifthdB);
 	}
 
 	mutex_unlock(&phy->lock);
@@ -1332,7 +1341,7 @@ void adrv9002_debugfs_create(struct adrv9002_rf_phy *phy, struct dentry *d)
 		debugfs_create_u8(attr, 0600, d, &phy->ssi_delays.txClkDelay[chan]);
 		sprintf(attr, "tx%d_ssi_refclk_delay", chan);
 		debugfs_create_u8(attr, 0600, d, &phy->ssi_delays.txRefClkDelay[chan]);
-		sprintf(attr, "tx%d_ssi_strobe_delay_delay", chan);
+		sprintf(attr, "tx%d_ssi_strobe_delay", chan);
 		debugfs_create_u8(attr, 0600, d, &phy->ssi_delays.txStrobeDelay[chan]);
 		sprintf(attr, "tx%d_ssi_i_data_delay", chan);
 		debugfs_create_u8(attr, 0600, d, &phy->ssi_delays.txIDataDelay[chan]);

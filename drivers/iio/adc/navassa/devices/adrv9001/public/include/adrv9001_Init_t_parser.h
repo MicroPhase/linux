@@ -1,6 +1,6 @@
 /* Auto-generated file - DO NOT MANUALLY EDIT */
 /* Filename: C:\Jenkins\workspace\vice-driver_profile-types_master\include\adrv9001_Init_t_parser.h */
-/* Created on: 6/29/2021 4:03:53 PM */
+/* Created on: 1/26/2022 1:23:20 PM */
 
 /**
  * Contains auto-generated C macros for loading fields from a JSON file
@@ -9,7 +9,7 @@
  */
 
 /** 
- * Copyright 2021 Analog Devices Inc.
+ * Copyright 2022 Analog Devices Inc.
  */
 
 #include "adi_pmag_macros.h"
@@ -132,6 +132,7 @@ ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv900
 ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_DeviceSysConfig_tInstance.pllLockTime_us,               "pllLockTime_us"); \
 ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_DeviceSysConfig_tInstance.pllPhaseSyncWait_us,          "pllPhaseSyncWait_us"); \
 ADI_PROCESS_STRUCT_ADRV9001_PLLMODULUS_T                           (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_DeviceSysConfig_tInstance.pllModulus,                   "pllModulus"); \
+ADI_PROCESS_BOOL     (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_DeviceSysConfig_tInstance.warmBootEnable,               "warmBootEnable"); \
 
 #define ADI_PROCESS_STRUCT_ADRV9001_DEVICESYSCONFIG_T(tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_DeviceSysConfig_tInstance, adrv9001_DeviceSysConfig_tName) \
 ADI_PROCESS_STRUCT_X(ADRV9001_DEVICESYSCONFIG_T(tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_DeviceSysConfig_tInstance), tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_DeviceSysConfig_tName);
@@ -558,7 +559,7 @@ ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv900
 ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_RxProfile_tInstance.rxOutputRate_Hz,                    "rxOutputRate_Hz"); \
 ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_RxProfile_tInstance.rxInterfaceSampleRate_Hz,           "rxInterfaceSampleRate_Hz"); \
 ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_RxProfile_tInstance.rxOffsetLo_kHz,                     "rxOffsetLo_kHz"); \
-ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_RxProfile_tInstance.rxSignalOnLo,                       "rxSignalOnLo"); \
+ADI_PROCESS_BOOL     (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_RxProfile_tInstance.rxNcoEnable,                        "rxNcoEnable"); \
 ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_RxProfile_tInstance.outputSignaling,                    "outputSignaling"); \
 ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_RxProfile_tInstance.filterOrder,                        "filterOrder"); \
 ADI_PROCESS_INT      (tokenArray, tokenIndex, jsonBuffer, parsingBuffer, adrv9001_RxProfile_tInstance.filterOrderLp,                      "filterOrderLp"); \

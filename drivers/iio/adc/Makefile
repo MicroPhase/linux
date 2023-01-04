@@ -7,6 +7,7 @@
 obj-$(CONFIG_AB8500_GPADC) += ab8500-gpadc.o
 obj-$(CONFIG_AD_SIGMA_DELTA) += ad_sigma_delta.o
 obj-$(CONFIG_AD400X) += ad400x.o
+obj-$(CONFIG_AD4630) += ad4630.o
 obj-$(CONFIG_AD6676) += ad6676.o
 obj-$(CONFIG_AD7173) += ad7173.o
 obj-$(CONFIG_AD7091R5) += ad7091r5.o ad7091r-base.o
@@ -52,6 +53,7 @@ ad9081_drv-y := ad9081.o \
 	ad9081/adi_ad9081_device.o \
 	ad9081/adi_ad9081_jesd.o \
 	ad9081/adi_ad9081_hal.o \
+	ad9081/adi_ad9081_sync.o \
 	ad9081/adi_ad9081_dac.o
 
 obj-$(CONFIG_AD9081) += ad9081_drv.o

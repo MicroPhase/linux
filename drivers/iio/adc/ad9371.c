@@ -111,6 +111,7 @@ enum ad9371_iio_dev_attr {
 	AD9371_ENSM_MODE,
 	AD9371_ENSM_MODE_AVAIL,
 	AD9371_INIT_CAL,
+	AD9371_LARGE_LO_STEP_CAL,
 };
 
 int ad9371_spi_read(struct spi_device *spi, unsigned reg)
@@ -1208,6 +1209,9 @@ static ssize_t ad9371_phy_store(struct device *dev,
 			ad9371_set_radio_state(phy, RADIO_RESTORE_STATE);
 		}
 		break;
+	case AD9371_LARGE_LO_STEP_CAL:
+		ret = strtobool(buf, &phy->large_freq_step_cal_en);
+		break;
 	default:
 		ret = -EINVAL;
 	}
@@ -1240,6 +1244,9 @@ static ssize_t ad9371_phy_show(struct device *dev,
 
 		if (val)
 			ret = sprintf(buf, "%d\n", !!(phy->cal_mask & val));
+		break;
+	case AD9371_LARGE_LO_STEP_CAL:
+		ret = sprintf(buf, "%u\n", phy->large_freq_step_cal_en);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1299,6 +1306,25 @@ static IIO_DEVICE_ATTR(calibrate_tx_lol_ext_en, S_IRUGO | S_IWUSR,
 		       ad9371_phy_store,
 		       AD9371_INIT_CAL | (TX_LO_LEAKAGE_EXTERNAL << 8));
 
+static IIO_DEVICE_ATTR(calibrate_loopback_rx_lo_delay_en, S_IRUGO | S_IWUSR,
+		       ad9371_phy_show,
+		       ad9371_phy_store,
+		       AD9371_INIT_CAL | (LOOPBACK_RX_LO_DELAY << 8));
+
+static IIO_DEVICE_ATTR(calibrate_loopback_rx_rx_qec_en, S_IRUGO | S_IWUSR,
+		       ad9371_phy_show,
+		       ad9371_phy_store,
+		       AD9371_INIT_CAL | (LOOPBACK_RX_RX_QEC_INIT << 8));
+
+static IIO_DEVICE_ATTR(calibrate_rx_lo_delay_en, S_IRUGO | S_IWUSR,
+		       ad9371_phy_show,
+		       ad9371_phy_store,
+		       AD9371_INIT_CAL | (RX_LO_DELAY << 8));
+
+static IIO_DEVICE_ATTR(large_lo_step_calibration_en, S_IRUGO | S_IWUSR,
+		       ad9371_phy_show,
+		       ad9371_phy_store,
+		       AD9371_LARGE_LO_STEP_CAL);
 
 static struct attribute *ad9371_phy_attributes[] = {
 	&iio_dev_attr_ensm_mode.dev_attr.attr,
@@ -1308,6 +1334,10 @@ static struct attribute *ad9371_phy_attributes[] = {
 	&iio_dev_attr_calibrate_tx_qec_en.dev_attr.attr,
 	&iio_dev_attr_calibrate_tx_lol_en.dev_attr.attr,
 	&iio_dev_attr_calibrate_tx_lol_ext_en.dev_attr.attr,
+	&iio_dev_attr_calibrate_loopback_rx_lo_delay_en.dev_attr.attr,
+	&iio_dev_attr_calibrate_loopback_rx_rx_qec_en.dev_attr.attr,
+	&iio_dev_attr_calibrate_rx_lo_delay_en.dev_attr.attr,
+	&iio_dev_attr_large_lo_step_calibration_en.dev_attr.attr,
 	NULL,
 };
 
@@ -1326,6 +1356,10 @@ static struct attribute *ad9375_phy_attributes[] = {
 	&iio_dev_attr_calibrate_tx_lol_en.dev_attr.attr,
 	&iio_dev_attr_calibrate_tx_lol_ext_en.dev_attr.attr,
 	&iio_dev_attr_calibrate_vswr_en.dev_attr.attr,
+	&iio_dev_attr_calibrate_loopback_rx_lo_delay_en.dev_attr.attr,
+	&iio_dev_attr_calibrate_loopback_rx_rx_qec_en.dev_attr.attr,
+	&iio_dev_attr_calibrate_rx_lo_delay_en.dev_attr.attr,
+	&iio_dev_attr_large_lo_step_calibration_en.dev_attr.attr,
 	NULL,
 };
 
@@ -1364,7 +1398,7 @@ static ssize_t ad9371_phy_lo_write(struct iio_dev *indio_dev,
 	struct ad9371_rf_phy *phy = iio_priv(indio_dev);
 	u64 readin;
 	u8 status;
-	int ret = 0;
+	int ret = 0, retry = 10;
 
 	ret = kstrtoull(buf, 10, &readin);
 	if (ret)
@@ -1378,9 +1412,30 @@ static ssize_t ad9371_phy_lo_write(struct iio_dev *indio_dev,
 		if (ret != MYKONOS_ERR_OK)
 			break;
 
-		ret = MYKONOS_checkPllsLockStatus(phy->mykDevice, &status);
-		if (!((status & BIT(chan->channel + 1) || (ret != MYKONOS_ERR_OK))))
-			ret = -EFAULT;
+		do {
+			ret = MYKONOS_checkPllsLockStatus(phy->mykDevice, &status);
+			if (!((status & BIT(chan->channel + 1) || (ret != MYKONOS_ERR_OK)))) {
+				msleep(20);
+				ret = -EFAULT;
+			}
+		} while (retry-- && ret == -EFAULT); /* Wait for up to 200ms */
+
+		if (phy->large_freq_step_cal_en) {
+			ret  = ad9371_init_cal(phy, TX_QEC_INIT | LOOPBACK_RX_LO_DELAY |
+				LOOPBACK_RX_RX_QEC_INIT | RX_LO_DELAY | RX_QEC_INIT);
+			if (ret != MYKONOS_ERR_OK) {
+				dev_err(&phy->spi->dev, "%s (%d)",
+					getMykonosErrorMessage(ret), ret);
+				ret = -EFAULT;
+			}
+		} else {
+			ret = MYKONOS_resetExtTxLolChannel(phy->mykDevice,
+				phy->mykDevice->tx->txChannels);
+
+			if (ret != MYKONOS_ERR_OK)
+				dev_err(&phy->spi->dev, "%s: %s (%d)", __func__,
+					getMykonosErrorMessage(ret), ret);
+		}
 
 		ad9371_set_radio_state(phy, RADIO_RESTORE_STATE);
 		break;
@@ -3684,7 +3739,23 @@ static int ad9371_parse_profile(struct ad9371_rf_phy *phy,
 		if (clocks) {
 			GET_TOKEN(mykDevice->clocks, deviceClock_kHz);
 			GET_TOKEN(mykDevice->clocks, clkPllVcoFreq_kHz);
-			GET_TOKEN(mykDevice->clocks, clkPllVcoDiv);
+
+			ret = sscanf(line, " <clkPllVcoDiv=%u.%u>", &int32, &int32_2);
+			if (ret > 0) {
+				if (ret == 1) {
+					if (int32 == 1)
+						mykDevice->clocks->clkPllVcoDiv = VCODIV_1;
+					else if (int32 == 2)
+						mykDevice->clocks->clkPllVcoDiv = VCODIV_2;
+					else if (int32 == 3)
+						mykDevice->clocks->clkPllVcoDiv = VCODIV_3;
+				} else if (ret == 2) {
+					if (int32 == 1 && int32_2 == 5)
+						mykDevice->clocks->clkPllVcoDiv = VCODIV_1p5;
+				}
+				continue;
+			}
+
 			GET_TOKEN(mykDevice->clocks, clkPllHsDiv);
 		}
 
@@ -4530,7 +4601,8 @@ static int ad9371_jesd204_clks_enable(struct jesd204_dev *jdev,
 	if (reason != JESD204_STATE_OP_REASON_INIT)
 		return JESD204_STATE_CHANGE_DONE;
 
-	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__, lnk->link_id, jesd204_state_op_reason_str(reason));
+	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__,
+		lnk->link_id, jesd204_state_op_reason_str(reason));
 
 	if (!lnk->num_converters)
 		return JESD204_STATE_CHANGE_DONE;
@@ -4557,9 +4629,21 @@ static int ad9371_jesd204_clks_enable(struct jesd204_dev *jdev,
 				getMykonosErrorMessage(ret), ret);
 			return -EFAULT;
 		}
+		ret = MYKONOS_enableSysrefToRxFramer(mykDevice, 1);
+		if (ret) {
+			dev_err(&phy->spi->dev, "%s (%d)",
+				getMykonosErrorMessage(ret), ret);
+			return -EFAULT;
+		}
 		break;
 	case FRAMER_LINK_ORX:
 		ret = MYKONOS_enableSysrefToObsRxFramer(mykDevice, 0);
+		if (ret) {
+			dev_err(&phy->spi->dev, "%s (%d)",
+				getMykonosErrorMessage(ret), ret);
+			return -EFAULT;
+		}
+		ret = MYKONOS_enableSysrefToObsRxFramer(mykDevice, 1);
 		if (ret) {
 			dev_err(&phy->spi->dev, "%s (%d)",
 				getMykonosErrorMessage(ret), ret);
@@ -4586,38 +4670,19 @@ static int ad9371_jesd204_link_enable(struct jesd204_dev *jdev,
 	if (reason != JESD204_STATE_OP_REASON_INIT)
 		return JESD204_STATE_CHANGE_DONE;
 
-	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__, lnk->link_id, jesd204_state_op_reason_str(reason));
+	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__,
+		lnk->link_id, jesd204_state_op_reason_str(reason));
 
 	if (!lnk->num_converters)
 		return JESD204_STATE_CHANGE_DONE;
 
-	switch (lnk->link_id) {
-	case DEFRAMER_LINK_TX:
+	if (lnk->link_id == DEFRAMER_LINK_TX) {
 		ret = MYKONOS_enableSysrefToDeframer(mykDevice, 1);
 		if (ret) {
 			dev_err(&phy->spi->dev, "%s (%d)",
 				getMykonosErrorMessage(ret), ret);
 			return -EFAULT;
 		}
-		break;
-	case FRAMER_LINK_RX:
-		ret = MYKONOS_enableSysrefToRxFramer(mykDevice, 1);
-		if (ret) {
-			dev_err(&phy->spi->dev, "%s (%d)",
-				getMykonosErrorMessage(ret), ret);
-			return -EFAULT;
-		}
-		break;
-	case FRAMER_LINK_ORX:
-		ret = MYKONOS_enableSysrefToObsRxFramer(mykDevice, 1);
-		if (ret) {
-			dev_err(&phy->spi->dev, "%s (%d)",
-				getMykonosErrorMessage(ret), ret);
-			return -EFAULT;
-		}
-		break;
-	default:
-		return -EINVAL;
 	}
 
 	return JESD204_STATE_CHANGE_DONE;
@@ -4791,6 +4856,7 @@ static const struct jesd204_dev_data jesd204_ad9371_init = {
 		},
 		[JESD204_OP_CLOCKS_ENABLE] = {
 			.per_link = ad9371_jesd204_clks_enable,
+			.post_state_sysref = true,
 		},
 		[JESD204_OP_LINK_ENABLE] = {
 			.per_link = ad9371_jesd204_link_enable,
@@ -5031,6 +5097,8 @@ static int ad9371_remove(struct spi_device *spi)
 {
 	struct ad9371_rf_phy *phy = ad9371_spi_to_phy(spi);
 
+	jesd204_fsm_stop(phy->jdev, JESD204_LINKS_ALL);
+	jesd204_fsm_clear_errors(phy->jdev, JESD204_LINKS_ALL);
 	release_firmware(phy->fw);
 	sysfs_remove_bin_file(&phy->indio_dev->dev.kobj, &phy->bin);
 	sysfs_remove_bin_file(&phy->indio_dev->dev.kobj, &phy->bin_gt);

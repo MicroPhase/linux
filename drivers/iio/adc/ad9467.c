@@ -159,6 +159,7 @@ enum {
 	ID_AD9467,
 	ID_AD9643,
 	ID_AD9250,
+	ID_AD9250_2,
 	ID_AD9265,
 	ID_AD9683,
 	ID_AD9625,
@@ -754,6 +755,19 @@ static const struct axiadc_chip_info ad9467_chip_tbl[] = {
 		.channel[0] = AIM_CHAN_NOCALIB(0, 0, 14, 'S', 0),
 		.channel[1] = AIM_CHAN_NOCALIB(1, 1, 14, 'S', 0),
 	},
+	[ID_AD9250_2] = {
+		.name = "AD9250_2",
+		.id = CHIPID_AD9250,
+		.max_rate = 250000000UL,
+		.scale_table = ad9643_scale_table,
+		.num_scales = ARRAY_SIZE(ad9643_scale_table),
+		.max_testmode = AN877_ADC_TESTMODE_RAMP,
+		.num_channels = 4,
+		.channel[0] = AIM_CHAN_NOCALIB(0, 0, 14, 'S', 0),
+		.channel[1] = AIM_CHAN_NOCALIB(1, 1, 14, 'S', 0),
+		.channel[2] = AIM_CHAN_NOCALIB(2, 2, 14, 'S', 0),
+		.channel[3] = AIM_CHAN_NOCALIB(3, 3, 14, 'S', 0),
+	},
 	[ID_AD9683] = {
 		.name = "AD9683",
 		.id = CHIPID_AD9683,
@@ -1210,7 +1224,7 @@ static int ad9467_probe(struct spi_device *spi)
 	if (IS_ERR(st->clk))
 		return PTR_ERR(st->clk);
 
-	if (info->id != CHIPID_AD9625) {
+	if (info->id != CHIPID_AD9625 && info->id != CHIPID_AD9250) {
 		ret = clk_prepare_enable(st->clk);
 		if (ret < 0)
 			return ret;
@@ -1268,6 +1282,7 @@ static const struct of_device_id ad9467_of_match[] = {
 	{ .compatible = "adi,ad9467", .data = &ad9467_chip_tbl[ID_AD9467], },
 	{ .compatible = "adi,ad9643", .data = &ad9467_chip_tbl[ID_AD9643], },
 	{ .compatible = "adi,ad9250", .data = &ad9467_chip_tbl[ID_AD9250], },
+	{ .compatible = "adi,ad9250_2", .data = &ad9467_chip_tbl[ID_AD9250_2], },
 	{ .compatible = "adi,ad9265", .data = &ad9467_chip_tbl[ID_AD9265], },
 	{ .compatible = "adi,ad9683", .data = &ad9467_chip_tbl[ID_AD9683], },
 	{ .compatible = "adi,ad9434", .data = &ad9467_chip_tbl[ID_AD9434], },

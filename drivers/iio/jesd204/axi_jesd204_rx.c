@@ -838,6 +838,9 @@ static int axi_jesd204_rx_jesd204_link_pre_setup(struct jesd204_dev *jdev,
 	}
 
 	rate = clk_round_rate(jesd->lane_clk, lane_rate);
+	dev_dbg(dev, "%s: Link%u round lane rate %lu returned %ld\n",
+		__func__, lnk->link_id, lane_rate, rate);
+
 	if (rate != (long)lane_rate) {
 		struct clk *parent;
 
@@ -848,8 +851,14 @@ static int axi_jesd204_rx_jesd204_link_pre_setup(struct jesd204_dev *jdev,
 		parent = clk_get_parent(jesd->lane_clk);
 		rate = clk_get_rate(parent);
 
+		dev_dbg(dev, "%s: Link%u lane parent rate %ld link_rate %ld\n",
+			__func__, lnk->link_id, rate, link_rate);
+
 		if (rate != (long)link_rate) {
 			rate = clk_round_rate(parent, link_rate);
+			dev_dbg(dev, "%s: Link%u round lane parent rate %ld\n",
+				__func__, lnk->link_id, rate);
+
 			if (rate == (long)link_rate) {
 				ret = clk_set_rate(parent, link_rate);
 				if (!ret && !IS_ERR_OR_NULL(jesd->conv2_clk))
@@ -912,17 +921,16 @@ static int axi_jesd204_rx_jesd204_clks_enable(struct jesd204_dev *jdev,
 	struct axi_jesd204_rx *jesd = dev_get_drvdata(dev);
 	int ret;
 
-	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__, lnk->link_id, jesd204_state_op_reason_str(reason));
+	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__,
+		lnk->link_id, jesd204_state_op_reason_str(reason));
 
 	switch (reason) {
 	case JESD204_STATE_OP_REASON_INIT:
 		break;
 	case JESD204_STATE_OP_REASON_UNINIT:
-		if (__clk_is_enabled(jesd->lane_clk)) /* REVIST */
-			clk_disable_unprepare(jesd->lane_clk);
 		if (__clk_is_enabled(jesd->device_clk))
 			clk_disable_unprepare(jesd->device_clk);
-		if (!IS_ERR(jesd->link_clk)) {
+		if (!IS_ERR_OR_NULL(jesd->link_clk)) {
 			if (__clk_is_enabled(jesd->link_clk))
 				clk_disable_unprepare(jesd->link_clk);
 		}
@@ -947,13 +955,6 @@ static int axi_jesd204_rx_jesd204_clks_enable(struct jesd204_dev *jdev,
 		}
 	}
 
-	ret = clk_prepare_enable(jesd->lane_clk);
-		if (ret) {
-		dev_err(dev, "%s: Link%u enable lane clock failed (%d)\n",
-			__func__, lnk->link_id, ret);
-		return ret;
-	}
-
 	return JESD204_STATE_CHANGE_DONE;
 }
 
@@ -963,8 +964,10 @@ static int axi_jesd204_rx_jesd204_link_enable(struct jesd204_dev *jdev,
 {
 	struct device *dev = jesd204_dev_to_device(jdev);
 	struct axi_jesd204_rx *jesd = dev_get_drvdata(dev);
+	int ret;
 
-	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__, lnk->link_id, jesd204_state_op_reason_str(reason));
+	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__,
+		lnk->link_id, jesd204_state_op_reason_str(reason));
 
 	switch (reason) {
 	case JESD204_STATE_OP_REASON_INIT:
@@ -974,10 +977,22 @@ static int axi_jesd204_rx_jesd204_link_enable(struct jesd204_dev *jdev,
 			cancel_delayed_work_sync(&jesd->watchdog_work);
 		else
 			disable_irq(jesd->irq);
+
 		writel_relaxed(0x1, jesd->base + JESD204_RX_REG_LINK_DISABLE);
+
+		if (__clk_is_enabled(jesd->lane_clk))
+			clk_disable_unprepare(jesd->lane_clk);
+
 		return JESD204_STATE_CHANGE_DONE;
 	default:
 		return JESD204_STATE_CHANGE_DONE;
+	}
+
+	ret = clk_prepare_enable(jesd->lane_clk);
+	if (ret) {
+		dev_err(dev, "%s: Link%u enable lane clock failed (%d)\n",
+			__func__, lnk->link_id, ret);
+		return ret;
 	}
 
 	writel_relaxed(0x3, jesd->base + JESD204_RX_REG_SYSREF_STATUS);
@@ -998,7 +1013,7 @@ static int axi_jesd204_rx_jesd204_link_running(struct jesd204_dev *jdev,
 	struct device *dev = jesd204_dev_to_device(jdev);
 	struct axi_jesd204_rx *jesd = dev_get_drvdata(dev);
 	unsigned int link_status;
-	int retry = 10;
+	int retry = 20;
 
 	dev_dbg(dev, "%s:%d link_num %u reason %s\n", __func__, __LINE__,
 		lnk->link_id, jesd204_state_op_reason_str(reason));
@@ -1153,19 +1168,13 @@ static int axi_jesd204_rx_probe(struct platform_device *pdev)
 	 * This is used in axi_jesd204_rx_jesd204_link_setup() where the
 	 * main REFCLK is the parent of jesd->lane_clk.
 	 */
-	jesd->conv2_clk = devm_clk_get(&pdev->dev, "conv2");
-	if (IS_ERR(jesd->conv2_clk)) {
-		if (PTR_ERR(jesd->conv2_clk) != -ENOENT)
-			return PTR_ERR(jesd->conv2_clk);
-		jesd->conv2_clk = NULL;
-	}
+	jesd->conv2_clk = devm_clk_get_optional(&pdev->dev, "conv2");
+	if (IS_ERR(jesd->conv2_clk))
+		return PTR_ERR(jesd->conv2_clk);
 
-	jesd->link_clk = devm_clk_get(&pdev->dev, "link_clk");
-	if (IS_ERR(jesd->link_clk)) {
-		if (PTR_ERR(jesd->link_clk) != -ENOENT)
-			return PTR_ERR(jesd->link_clk);
-		jesd->link_clk = NULL;
-	}
+	jesd->link_clk = devm_clk_get_optional(&pdev->dev, "link_clk");
+	if (IS_ERR(jesd->link_clk))
+		return PTR_ERR(jesd->link_clk);
 
 	ret = clk_prepare_enable(jesd->axi_clk);
 	if (ret)

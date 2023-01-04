@@ -46,8 +46,8 @@ After being requested, a PWM has to be configured using::
 
 	int pwm_apply_state(struct pwm_device *pwm, struct pwm_state *state);
 
-This API controls both the PWM period/duty_cycle config and the
-enable/disable state.
+This API controls the PWM period, duty_cycle and phase config together with
+the enable/disable state.
 
 The pwm_config(), pwm_enable() and pwm_disable() functions are just wrappers
 around pwm_apply_state() and should not be used if the user wants to change
@@ -95,18 +95,33 @@ channel that was exported. The following properties will then be available:
 
   period
     The total period of the PWM signal (read/write).
-    Value is in nanoseconds and is the sum of the active and inactive
-    time of the PWM.
+    Value the sum of the active and inactive time of the PWM, using the
+    time_unit property as a measurment unit.
 
   duty_cycle
     The active time of the PWM signal (read/write).
-    Value is in nanoseconds and must be less than the period.
+    Value must be less than the period and uses the time_unit property as
+    a measurment unit.
+
+  phase
+    The phase difference between the actual PWM signal and the reference one.
+    The value must be lower than period and uses the time_unit property as a
+    measurment unit.
 
   polarity
     Changes the polarity of the PWM signal (read/write).
     Writes to this property only work if the PWM chip supports changing
     the polarity. The polarity can only be changed if the PWM is not
     enabled. Value is the string "normal" or "inversed".
+
+  time_unit
+    The time unit used to measure the pwm period, duty_cycle and phase.
+
+  - 1 - seconds
+  - 2 - miliseconds
+  - 3 - microseconds
+  - 4 - nanoseconds
+  - 5 - picoseconds
 
   enable
     Enable/disable the PWM signal (read/write).
