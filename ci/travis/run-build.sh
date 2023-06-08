@@ -69,11 +69,11 @@ fi
 
 if [ "$ARCH" = "arm" ] ; then
 	if [ -z "$CROSS_COMPILE" ] ; then
-		CROSS_COMPILE=arm-linux-gnueabihf-
+		CROSS_COMPILE=arm-linux-gnueabi-
 		export CROSS_COMPILE
 	fi
 
-	APT_LIST="$APT_LIST gcc-arm-linux-gnueabihf"
+	APT_LIST="$APT_LIST gcc-arm-linux-gnueabi"
 fi
 
 apt_update_install() {
@@ -175,6 +175,12 @@ build_check_is_new_adi_driver_dual_licensed() {
 	return $ret
 }
 
+__setup_dummy_git_account() {
+	# setup an email account so that we can cherry-pick stuff
+	git config user.name "CSE CI"
+	git config user.email "cse-ci-notifications@analog.com"
+}
+
 build_default() {
 	[ -n "$DEFCONFIG" ] || {
 		echo_red "No DEFCONFIG provided"
@@ -193,6 +199,38 @@ build_default() {
 	# make sure git does not complain about unsafe repositories when
 	# building inside docker.
 	[ -d /docker_build_dir ] && git config --global --add safe.directory /docker_build_dir
+
+	# !\FIXME: This is a very hacky way to make sure the 'savedefconfig' mechanism in the
+	# end of the function won't trigger a CI build failure. The issue here is that with
+	# xilinx toolchain, the build system will detect that GCC_PLUGINS are enabled, as the
+	# toolchan "supports" them, but the build will fail to build them... As we want to be able
+	# to compile the kernel with xilinx toolchain (do we?) we need to explicitly disable
+	# GCC_PLUGINS in our defconfigs (as xilinx is also doing BTW).
+	#
+	# So far so good... The problem now comes in the CI build because the distro toolchains
+	# don't have any GCC_PLUGINS support which means that the kernel build system won't enable
+	# GCC_PLUGINS and thus, when running 'make savedefconfig', the line
+	# '# CONFIG_GCC_PLUGINS is not set' will be removed causing the CI build to fail because now
+	# the new defconfig differs the one in git (see some lines below in the function).
+	#
+	# All the above said, the solution is just to remove the line where we disable the PLUGINS and
+	# locally commit it. Yes, this is very hacky but I'm not seeing any other way unless we:
+	#
+	#  1) Just remove the 'savedefconfig' mechanism from here.
+	#  2) Don't care about xilinx toolchain so that we don't need to change our defconfigs. Anyone
+	#     using the toolchain will have to locally handle this...
+	#  3) Ideas?
+	#
+	# Also note that this is only an issue for ARM...
+	#
+	# We should keep an eye on this (every time we upgrade) so we can remove this as soon as possible...
+	[ "$ARCH" = "arm" ] && {
+		sed -i  '/CONFIG_GCC_PLUGINS/d' arch/arm/configs/$DEFCONFIG
+		__setup_dummy_git_account
+		# don't error out if the commit fails as we don't explicitly disable the plugins for
+		# some configs (eg: socfga).
+		git commit -a -m "dummy commit to remove CONFIG_GCC_PLUGINS" || true
+	}
 
 	make ${DEFCONFIG}
 	if [[ "${SYSTEM_PULLREQUEST_TARGETBRANCH}" =~ ^rpi-.* || "${BUILD_SOURCEBRANCH}" =~ ^refs/heads/rpi-.* \
@@ -437,11 +475,7 @@ __handle_sync_with_main() {
 
 	tmpfile=$(mktemp)
 
-	if [ "$CI" = "true" ] ; then
-		# setup an email account so that we can cherry-pick stuff
-		git config user.name "CSE CI"
-		git config user.email "cse-ci-notifications@analog.com"
-	fi
+	[ "$CI" = "true" ] && __setup_dummy_git_account
 
 	git checkout FETCH_HEAD
 	# cherry-pick until all commits; if we get a merge-commit, handle it. Note that
@@ -471,7 +505,7 @@ __handle_sync_with_main() {
 
 build_sync_branches_with_main() {
 	GIT_FETCH_DEPTH=50
-	BRANCHES="adi-5.10.0 rpi-5.10.y"
+	BRANCHES="adi-5.15.0 rpi-5.15.y"
 
 	__update_git_ref "$MAIN_BRANCH" "$MAIN_BRANCH" || {
 		echo_red "Could not fetch branch '$MAIN_BRANCH'"

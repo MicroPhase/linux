@@ -172,9 +172,10 @@ config AD5696_I2C
 	depends on I2C
 	select AD5686
 	help
-	  Say yes here to build support for Analog Devices AD5671R,AD5673R,
-	  AD5675R, AD5677R, AD5694, AD5694R, AD5695R, AD5696, AD5696R Voltage
-	  Output Digital to Analog Converter.
+	  Say yes here to build support for Analog Devices AD5311R, AD5338R,
+	  AD5671R, AD5673R, AD5675R, AD5677R, AD5691R, AD5692R, AD5693, AD5693R,
+	  AD5694, AD5694R, AD5695R, AD5696, and AD5696R Digital to Analog
+	  converters.
 
 	  To compile this driver as a module, choose M here: the module will be
 	  called ad5696.
@@ -333,6 +334,13 @@ config LTC1660
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called ltc1660.
+
+config LTC2630_MICROPHASE
+	tristate "LTC 2630 DAC ref PLL"
+	depends on SPI
+	help
+	  Say yes here to build support for Linear Technology
+	  Ltc 2630 DAC ref pll use in microphase antsdr-E200/E310 V2
 
 config LTC2632
 	tristate "Linear Technology LTC2632-12/10/8 and similar DAC spi driver"

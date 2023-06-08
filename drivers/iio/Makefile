@@ -20,6 +20,7 @@ obj-y += afe/
 obj-y += amplifiers/
 obj-y += beamformer/
 obj-y += buffer/
+obj-y += cdc/
 obj-y += chemical/
 obj-y += common/
 obj-y += dac/
@@ -43,6 +44,8 @@ obj-y += potentiostat/
 obj-y += pressure/
 obj-y += proximity/
 obj-y += resolver/
+obj-y += sdr/
 obj-y += temperature/
+obj-y += test/
 obj-y += trigger/
 

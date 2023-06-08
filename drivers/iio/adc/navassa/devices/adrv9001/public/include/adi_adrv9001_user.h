@@ -22,6 +22,7 @@
 #define ADI_ADRV9001_ARM_MEM_AUTO_INCR 1
 #define ADI_ADRV9001_ARM_MEM_CACHE_ENABLE 1
 #define ADI_ADRV9001_PRE_MCS_BROADCAST_DISABLE 1    /* Set to 0 for SPI Write only (Broadcasting) */
+#define ADI_ADRV9001_ARM_SET_OPCODE_WAIT_INTERVAL_US 18
 
 #define ADI_ADRV9001_FRONT_END_GPIO_DOWNLOAD 0      /* Set this to '1' to download front end GPIO */
 #define	ADI_ADRV9001_SLEWRATE_CONFIG    1           /* Set this to '1' to enable slew rate configuration */
@@ -153,6 +154,15 @@
 #define ADI_ADRV9001_SSI_DEBUG_TIMEOUT_US         1000000
 #define ADI_ADRV9001_SSI_DEBUG_INTERVAL_US          10000
 
+#define ADI_ADRV9001_GETTXATTEN_WAIT_INTERVAL_US	0
+
+#define ADI_ADRV9001_MEM_WRITE_OVERHEAD_BYTES     14u   /* Bytes required as overhead when writing FHTable */
+#define ADI_ADRV9001_FREQ_HOPPING_NUM_TABLE_BYTES 1280u /* Number of bytes required to write table FHTable. */
+                                                        /* Size of Table (Max 64) * 20 Bytes. */
+                                                        /* User may set lower value if smaller table size is used */
+
+#define ADI_ADRV9001_FREQ_HOPPING_MAX_NUM_BYTES   (ADI_ADRV9001_MEM_WRITE_OVERHEAD_BYTES      +\
+                                                   ADI_ADRV9001_FREQ_HOPPING_NUM_TABLE_BYTES)
 /*
  *****************************************
  * Rx and ObsRx gain tables

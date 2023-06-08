@@ -89,6 +89,7 @@ enum adrv9002_rx_ext_info {
 	RX_ADC_SWITCH,
 	RX_BBDC,
 	RX_BBDC_LOOP_GAIN,
+	RX_INTERFACE_GAIN_AVAIL,
 };
 
 enum adrv9002_tx_ext_info {
@@ -147,6 +148,8 @@ struct adrv9002_clock {
 
 struct adrv9002_chan {
 	struct clk *clk;
+	struct gpio_desc *mux_ctl;
+	struct gpio_desc *mux_ctl_2;
 	struct adrv9002_ext_lo *ext_lo;
 	/*
 	 * These values are in nanoseconds. They need to be converted with
@@ -219,6 +222,7 @@ struct adrv9002_rf_phy {
 	struct iio_dev			*indio_dev;
 	struct gpio_desc		*reset_gpio;
 	struct gpio_desc		*ssi_sync;
+	struct iio_chan_spec		*iio_chan;
 	/* Protect against concurrent accesses to the device */
 	struct mutex			lock;
 	struct clk			*clks[NUM_ADRV9002_CLKS];

@@ -356,7 +356,7 @@ static int adin1110_read_fifo(struct adin1110_port_priv *port_priv)
 
 	if ((port_priv->flags & IFF_ALLMULTI && rxb->pkt_type == PACKET_MULTICAST) ||
 	    (port_priv->flags & IFF_BROADCAST && rxb->pkt_type == PACKET_BROADCAST))
-		rxb->offload_fwd_mark = 1;
+		rxb->offload_fwd_mark = port_priv->priv->forwarding;
 
 	netif_rx(rxb);
 
@@ -1302,9 +1302,9 @@ static int adin1110_port_attr_stp_state_set(struct adin1110_port_priv *port_priv
 	}
 }
 
-static int adin1110_port_attr_set(struct net_device *dev,
+static int adin1110_port_attr_set(struct net_device *dev, const void *ctx,
 				  const struct switchdev_attr *attr,
-				  struct switchdev_trans *trans)
+				  struct netlink_ext_ack *extack)
 {
 	struct adin1110_port_priv *port_priv = netdev_priv(dev);
 
